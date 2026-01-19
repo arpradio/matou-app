@@ -67,9 +67,11 @@ backend/
 │   │   ├── client.go               # Local storage layer (anytype-heart based)
 │   │   └── client_test.go          # anystore tests
 │   ├── keri/
-│   │   └── client.go               # KERIA API client (WIP)
+│   │   ├── client.go               # KERI client (kli via Docker)
+│   │   └── client_test.go          # KERI client tests
 │   └── api/
-│       └── grpc/                   # gRPC API server (planned)
+│       ├── credentials.go          # Credential HTTP endpoints
+│       └── credentials_test.go     # Credential API tests
 ├── config/
 │   ├── bootstrap.yaml              # Bootstrap config (gitignored)
 │   ├── .org-passcode               # Org passcode (gitignored)
@@ -186,16 +188,42 @@ go test ./... -cover
 
 ## API Endpoints
 
-### Current
+### System
 
 - `GET /health` - Health check with org AID
 - `GET /info` - System information
 
+### Credentials
+
+- `GET /api/v1/credentials/roles` - List available roles and permissions
+- `POST /api/v1/credentials/issue` - Issue a membership credential
+- `POST /api/v1/credentials/verify` - Verify a credential
+
+#### Issue Credential
+
+```bash
+curl -X POST http://localhost:8080/api/v1/credentials/issue \
+  -H "Content-Type: application/json" \
+  -d '{"recipientAid": "EAID123...", "role": "Member"}'
+```
+
+#### Verify Credential
+
+```bash
+curl -X POST http://localhost:8080/api/v1/credentials/verify \
+  -H "Content-Type: application/json" \
+  -d '{"credential": {...}}'
+```
+
+#### List Roles
+
+```bash
+curl http://localhost:8080/api/v1/credentials/roles
+```
+
 ### Planned
 
-- `POST /identity/create` - Create new AID via KERIA
-- `POST /credential/issue` - Issue ACDC credential
-- `POST /credential/verify` - Verify ACDC credential
+- `POST /api/v1/identity/create` - Create new AID via KERIA
 
 ## Bootstrap Scripts
 

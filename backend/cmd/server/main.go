@@ -4,9 +4,12 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/matou-dao/backend/internal/anysync"
+	"github.com/matou-dao/backend/internal/api"
 	"github.com/matou-dao/backend/internal/config"
+	"github.com/matou-dao/backend/internal/keri"
 )
 
 func main() {
@@ -37,6 +40,40 @@ func main() {
 	fmt.Printf("✅ any-sync client initialized\n")
 	fmt.Printf("   Network ID: %s\n", anysyncClient.GetNetworkID())
 	fmt.Printf("   Coordinator: %s\n", anysyncClient.GetCoordinatorURL())
+	fmt.Println()
+
+	// Initialize KERI client
+	fmt.Println("Initializing KERI client...")
+	keriPasscode := os.Getenv("MATOU_ORG_PASSCODE")
+	if keriPasscode == "" {
+		// Try loading from file
+		if data, err := os.ReadFile("config/.org-passcode"); err == nil {
+			keriPasscode = string(data)
+		}
+	}
+
+	var keriClient *keri.Client
+	var credHandler *api.CredentialsHandler
+
+	if keriPasscode != "" {
+		keriClient, err = keri.NewClient(&keri.Config{
+			ContainerName: os.Getenv("KERIA_CONTAINER"),
+			OrgName:       "matou-org",
+			OrgPasscode:   keriPasscode,
+			OrgAlias:      "matou-org",
+		})
+		if err != nil {
+			fmt.Printf("⚠️  KERI client initialization failed: %v\n", err)
+			fmt.Println("   Credential endpoints will be disabled")
+		} else {
+			fmt.Printf("✅ KERI client initialized\n")
+			credHandler = api.NewCredentialsHandler(keriClient)
+		}
+	} else {
+		fmt.Println("⚠️  KERI passcode not configured")
+		fmt.Println("   Set MATOU_ORG_PASSCODE or create config/.org-passcode")
+		fmt.Println("   Credential endpoints will be disabled")
+	}
 	fmt.Println()
 
 	// Create HTTP server
@@ -79,13 +116,23 @@ func main() {
 		)
 	})
 
+	// Register credential endpoints if KERI client is available
+	if credHandler != nil {
+		credHandler.RegisterRoutes(mux)
+	}
+
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	fmt.Printf("🌐 Starting HTTP server on %s\n", addr)
 	fmt.Println()
 	fmt.Println("Endpoints:")
-	fmt.Println("  GET  /health - Health check")
-	fmt.Println("  GET  /info   - System information")
+	fmt.Println("  GET  /health                    - Health check")
+	fmt.Println("  GET  /info                      - System information")
+	if credHandler != nil {
+		fmt.Println("  GET  /api/v1/credentials/roles  - List available roles")
+		fmt.Println("  POST /api/v1/credentials/issue  - Issue a credential")
+		fmt.Println("  POST /api/v1/credentials/verify - Verify a credential")
+	}
 	fmt.Println()
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
