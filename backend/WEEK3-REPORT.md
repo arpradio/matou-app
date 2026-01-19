@@ -2,7 +2,7 @@
 
 **Task**: Backend Sync Integration + Frontend Start
 **Date**: January 19, 2026
-**Status**: 🔄 IN PROGRESS (Day 2 Complete)
+**Status**: 🔄 IN PROGRESS (Day 3 Complete)
 
 ---
 
@@ -52,7 +52,7 @@ Without this sync layer, the backend would be isolated from identity data, unabl
 |-----|-------|--------|
 | Day 1 | any-sync Space Management | ✅ Complete |
 | Day 2 | Sync Endpoints | ✅ Complete |
-| Day 3 | Trust Graph Foundation | ⏳ Pending |
+| Day 3 | Trust Graph Foundation | ✅ Complete |
 | Day 4-5 | Integration Testing | ⏳ Pending |
 
 ---
@@ -382,16 +382,269 @@ All 75+ tests passing.
 
 ---
 
-## Day 3 Preview: Trust Graph Foundation
+## Day 3: Trust Graph Foundation
 
-### Planned Implementation
+**Date**: January 19, 2026
+**Status**: ✅ COMPLETE
 
-| Task | Description |
+### Goal
+
+Implement the trust graph data structures, graph builder, trust score calculation, and API endpoints for trust-based queries.
+
+### Activities Completed
+
+#### 1. Trust Graph Data Structures ✅
+
+**File**: `internal/trust/types.go` (145 lines)
+
+Created core data structures for representing the trust graph:
+
+| Type | Description |
 |------|-------------|
-| Trust Graph Data Structures | Node, Edge, TrustGraph structs |
-| Trust Score Calculation | Compute scores from credential relationships |
-| Graph Builder | Build graph from cached credentials |
-| API Endpoints | GET /api/v1/trust/graph, GET /api/v1/trust/score/{aid} |
+| `Node` | Represents an AID in the graph with alias, role, join date |
+| `Edge` | Directed relationship between AIDs (credential-based) |
+| `Graph` | Complete graph with nodes, edges, and org root |
+| `Score` | Trust score for an individual AID |
+
+**Node Structure**:
+```go
+type Node struct {
+    AID             string    `json:"aid"`
+    Alias           string    `json:"alias,omitempty"`
+    Role            string    `json:"role"`
+    JoinedAt        time.Time `json:"joinedAt"`
+    CredentialCount int       `json:"credentialCount"`
+}
+```
+
+**Edge Types**:
+```go
+const (
+    EdgeTypeMembership = "membership"  // Org → Member
+    EdgeTypeSteward    = "steward"     // Org → Steward
+    EdgeTypeInvitation = "invitation"  // Member → Member
+    EdgeTypeSelfClaim  = "self_claim"  // Self-issued
+)
+```
+
+**Score Structure**:
+```go
+type Score struct {
+    AID                    string  `json:"aid"`
+    Alias                  string  `json:"alias,omitempty"`
+    Role                   string  `json:"role,omitempty"`
+    IncomingCredentials    int     `json:"incomingCredentials"`
+    OutgoingCredentials    int     `json:"outgoingCredentials"`
+    UniqueIssuers          int     `json:"uniqueIssuers"`
+    BidirectionalRelations int     `json:"bidirectionalRelations"`
+    GraphDepth             int     `json:"graphDepth"`
+    Score                  float64 `json:"score"`
+}
+```
+
+#### 2. Graph Builder ✅
+
+**File**: `internal/trust/builder.go` (275 lines)
+
+Created `Builder` struct to construct graphs from cached credentials:
+
+| Method | Description |
+|--------|-------------|
+| `NewBuilder()` | Create builder with anystore and org AID |
+| `Build()` | Build full trust graph from all credentials |
+| `BuildForAID()` | Build subgraph centered on specific AID |
+| `getAllCredentials()` | Retrieve all cached credentials |
+| `processCredential()` | Extract nodes/edges from credential |
+| `extractCredentialData()` | Parse role, displayName, timestamps |
+
+**Graph Build Process**:
+1. Initialize graph with org as root node
+2. Query all credentials from anystore cache
+3. For each credential:
+   - Add issuer node (with role inference)
+   - Add subject node (with credential data)
+   - Add edge with appropriate type
+4. Mark bidirectional edges (mutual relationships)
+5. Return complete graph with timestamp
+
+#### 3. Trust Score Calculator ✅
+
+**File**: `internal/trust/score.go` (260 lines)
+
+Implemented trust score calculation with configurable weights:
+
+| Method | Description |
+|--------|-------------|
+| `NewCalculator()` | Create with custom weights |
+| `NewDefaultCalculator()` | Create with default weights |
+| `CalculateScore()` | Calculate score for single AID |
+| `calculateDepth()` | BFS depth from org root |
+| `computeScore()` | Apply weights to metrics |
+| `CalculateAllScores()` | Scores for all nodes |
+| `GetTopScores()` | Top N scores sorted descending |
+| `CalculateSummary()` | Graph-wide statistics |
+
+**Default Score Weights**:
+```go
+func DefaultWeights() ScoreWeights {
+    return ScoreWeights{
+        IncomingCredential:    1.0,  // Per incoming credential
+        UniqueIssuer:          2.0,  // Per unique issuer
+        BidirectionalRelation: 3.0,  // Per mutual relationship
+        DepthPenalty:          0.1,  // Per level from org
+        OrgIssuedBonus:        2.0,  // For org-issued credentials
+    }
+}
+```
+
+**Score Formula**:
+```
+Score = (IncomingCredentials × 1.0)
+      + (UniqueIssuers × 2.0)
+      + (BidirectionalRelations × 3.0)
+      + (OrgIssuedCredentials × 2.0)
+      - (GraphDepth × 0.1)
+```
+
+**BFS Depth Calculation**:
+- Depth 0: Organization (root)
+- Depth 1: Direct members (org → member)
+- Depth 2+: Invited members (member → member chain)
+- Depth -1: Unreachable nodes
+
+#### 4. Trust API Endpoints ✅
+
+**File**: `internal/api/trust.go` (231 lines)
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/trust/graph` | GET | Get trust graph (full or filtered) |
+| `/api/v1/trust/score/{aid}` | GET | Get trust score for specific AID |
+| `/api/v1/trust/scores` | GET | Get top trust scores (sorted) |
+| `/api/v1/trust/summary` | GET | Get graph summary statistics |
+
+**Query Parameters**:
+- `GET /api/v1/trust/graph?aid={aid}&depth={n}&summary=true`
+  - `aid`: Focus on specific AID (optional)
+  - `depth`: Depth limit for subgraph (default: full)
+  - `summary`: Include summary stats (default: false)
+
+- `GET /api/v1/trust/scores?limit={n}`
+  - `limit`: Maximum scores to return (default: 10)
+
+**Response Types**:
+```go
+type GraphResponse struct {
+    Graph   *trust.Graph        `json:"graph"`
+    Summary *trust.ScoreSummary `json:"summary,omitempty"`
+}
+
+type ScoreSummary struct {
+    TotalNodes         int     `json:"totalNodes"`
+    TotalEdges         int     `json:"totalEdges"`
+    AverageScore       float64 `json:"averageScore"`
+    MaxScore           float64 `json:"maxScore"`
+    MinScore           float64 `json:"minScore"`
+    MedianDepth        int     `json:"medianDepth"`
+    BidirectionalCount int     `json:"bidirectionalCount"`
+}
+```
+
+#### 5. Comprehensive Tests ✅
+
+**File**: `internal/trust/types_test.go` (320 lines)
+
+| Test | Coverage |
+|------|----------|
+| `TestNewGraph` | Graph initialization |
+| `TestGraph_AddNode` | Node addition with dedup |
+| `TestGraph_AddEdge` | Edge addition with dedup |
+| `TestGraph_GetNode` | Node retrieval |
+| `TestGraph_GetEdgesFrom` | Outgoing edges |
+| `TestGraph_GetEdgesTo` | Incoming edges |
+| `TestGraph_HasBidirectionalRelation` | Mutual relationship detection |
+| `TestGraph_MarkBidirectionalEdges` | Bulk bidirectional marking |
+| `TestGraph_NodeCount/EdgeCount` | Counter methods |
+| `TestSchemaToEdgeType` | Schema → edge type mapping |
+| `TestNode_Fields/Edge_Fields/Score_Fields` | Struct validation |
+
+**File**: `internal/trust/score_test.go` (325 lines)
+
+| Test | Coverage |
+|------|----------|
+| `TestNewDefaultCalculator` | Calculator initialization |
+| `TestDefaultWeights` | Weight defaults |
+| `TestCalculator_CalculateScore_BasicMember` | Simple member score |
+| `TestCalculator_CalculateScore_OrgNode` | Org node (depth 0) |
+| `TestCalculator_CalculateScore_BidirectionalRelation` | Mutual relationships |
+| `TestCalculator_CalculateScore_MultipleIssuers` | Issuer diversity |
+| `TestCalculator_CalculateScore_DeepGraph` | Chain depth calculation |
+| `TestCalculator_CalculateScore_UnreachableNode` | Disconnected nodes |
+| `TestCalculator_CalculateAllScores` | Full graph scoring |
+| `TestCalculator_GetTopScores` | Sorted top N |
+| `TestCalculator_CalculateSummary` | Graph statistics |
+| `TestCalculator_CalculateSummary_EmptyGraph` | Empty graph handling |
+| `TestCalculator_CustomWeights` | Custom weight testing |
+
+**File**: `internal/trust/builder_test.go` (485 lines)
+
+| Test | Coverage |
+|------|----------|
+| `TestNewBuilder` | Builder initialization |
+| `TestBuilder_Build_EmptyStore` | Empty cache handling |
+| `TestBuilder_Build_WithCredentials` | Basic graph building |
+| `TestBuilder_Build_WithInvitations` | Invitation edge types |
+| `TestBuilder_Build_BidirectionalRelations` | Mutual invitations |
+| `TestBuilder_BuildForAID` | Subgraph depth 1 |
+| `TestBuilder_BuildForAID_Depth2` | Subgraph depth 2 |
+| `TestBuilder_BuildForAID_NonExistent` | Non-existent AID |
+| `TestBuilder_Build_StoresPersistently` | Persistence test |
+
+**File**: `internal/api/trust_test.go` (510 lines)
+
+| Test | Coverage |
+|------|----------|
+| `TestNewTrustHandler` | Handler initialization |
+| `TestHandleGetGraph_EmptyStore` | Empty graph response |
+| `TestHandleGetGraph_WithCredentials` | Graph with credentials |
+| `TestHandleGetGraph_WithSummary` | Summary inclusion |
+| `TestHandleGetGraph_WithAIDFilter` | Subgraph filtering |
+| `TestHandleGetGraph_MethodNotAllowed` | HTTP method check |
+| `TestHandleGetScore` | Individual score retrieval |
+| `TestHandleGetScore_NotFound` | Missing AID handling |
+| `TestHandleGetScore_MissingAID` | Path validation |
+| `TestHandleGetScores` | Top scores endpoint |
+| `TestHandleGetScores_WithLimit` | Limit parameter |
+| `TestHandleGetSummary` | Summary endpoint |
+| `TestHandleGetSummary_MethodNotAllowed` | HTTP method check |
+| `TestTrustHandler_RegisterRoutes` | Route registration |
+
+### Test Results
+
+```
+ok  github.com/matou-dao/backend/internal/anystore   (cached)
+ok  github.com/matou-dao/backend/internal/anysync    (cached)
+ok  github.com/matou-dao/backend/internal/api        1.823s
+ok  github.com/matou-dao/backend/internal/config     (cached)
+ok  github.com/matou-dao/backend/internal/keri       (cached)
+ok  github.com/matou-dao/backend/internal/trust      0.600s
+```
+
+All 100+ tests passing.
+
+### Files Created/Modified
+
+| File | Action | Lines |
+|------|--------|-------|
+| `internal/trust/types.go` | Created | 145 |
+| `internal/trust/types_test.go` | Created | 320 |
+| `internal/trust/builder.go` | Created | 275 |
+| `internal/trust/builder_test.go` | Created | 485 |
+| `internal/trust/score.go` | Created | 260 |
+| `internal/trust/score_test.go` | Created | 325 |
+| `internal/api/trust.go` | Created | 231 |
+| `internal/api/trust_test.go` | Created | 510 |
+| `cmd/server/main.go` | Modified | +15 |
 
 ---
 
@@ -414,14 +667,23 @@ All 75+ tests passing.
 │  │  │ SyncHandler  │────►│      SpaceManager            │  │   │
 │  │  │ (Day 2) ✅   │     │      (Day 1) ✅              │  │   │
 │  │  └──────────────┘     └──────────────┬───────────────┘  │   │
-│  │                                       │                  │   │
-│  │                          ┌────────────┼────────────┐     │   │
-│  │                          ▼            ▼            ▼     │   │
-│  │                   ┌──────────┐  ┌──────────┐  ┌───────┐ │   │
-│  │                   │ anystore │  │ Private  │  │Commun-│ │   │
-│  │                   │ (cache)  │  │ Space    │  │ity    │ │   │
-│  │                   │ (Day 1)✅│  │ (Day 1)✅│  │Space  │ │   │
-│  │                   └──────────┘  └──────────┘  └───────┘ │   │
+│  │         │                            │                  │   │
+│  │         │            ┌───────────────┼────────────┐     │   │
+│  │         │            ▼               ▼            ▼     │   │
+│  │         │     ┌──────────┐     ┌──────────┐  ┌───────┐ │   │
+│  │         │     │ anystore │     │ Private  │  │Commun-│ │   │
+│  │         │     │ (cache)  │     │ Space    │  │ity    │ │   │
+│  │         │     │ (Day 1)✅│     │ (Day 1)✅│  │Space  │ │   │
+│  │         │     └────┬─────┘     └──────────┘  └───────┘ │   │
+│  │         │          │                                    │   │
+│  │         ▼          ▼                                    │   │
+│  │  ┌──────────────────────────────────────────────────┐  │   │
+│  │  │              Trust Graph (Day 3) ✅               │  │   │
+│  │  │  ┌──────────┐  ┌───────────┐  ┌──────────────┐   │  │   │
+│  │  │  │ Builder  │  │Calculator │  │ TrustHandler │   │  │   │
+│  │  │  └──────────┘  └───────────┘  └──────────────┘   │  │   │
+│  │  │  GET /trust/graph | /trust/score/{aid} | /scores │  │   │
+│  │  └──────────────────────────────────────────────────┘  │   │
 │  └─────────────────────────────────────────────────────────┘   │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
@@ -431,5 +693,6 @@ All 75+ tests passing.
 
 **Day 1 Implementation**: Complete
 **Day 2 Implementation**: Complete
-**Tests**: All passing (75+)
-**Status**: ✅ Ready for Day 3
+**Day 3 Implementation**: Complete
+**Tests**: All passing (100+)
+**Status**: ✅ Ready for Day 4-5 Integration Testing

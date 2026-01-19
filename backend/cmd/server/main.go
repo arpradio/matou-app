@@ -99,6 +99,7 @@ func main() {
 	// Create API handlers
 	credHandler := api.NewCredentialsHandler(keriClient, store)
 	syncHandler := api.NewSyncHandler(keriClient, store, spaceManager, spaceStore)
+	trustHandler := api.NewTrustHandler(store, cfg.GetOrgAID())
 
 	// Create HTTP server
 	mux := http.NewServeMux()
@@ -143,6 +144,7 @@ func main() {
 	// Register API routes
 	credHandler.RegisterRoutes(mux)
 	syncHandler.RegisterRoutes(mux)
+	trustHandler.RegisterRoutes(mux)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -165,6 +167,12 @@ func main() {
 	fmt.Println("  POST /api/v1/sync/kel              - Sync KEL from KERIA")
 	fmt.Println("  GET  /api/v1/community/members     - List community members")
 	fmt.Println("  GET  /api/v1/community/credentials - List community-visible credentials")
+	fmt.Println()
+	fmt.Println("  Trust Graph (Week 3):")
+	fmt.Println("  GET  /api/v1/trust/graph           - Get trust graph (full or filtered)")
+	fmt.Println("  GET  /api/v1/trust/score/{aid}     - Get trust score for an AID")
+	fmt.Println("  GET  /api/v1/trust/scores          - Get top trust scores")
+	fmt.Println("  GET  /api/v1/trust/summary         - Get trust graph summary")
 	fmt.Println()
 
 	if err := http.ListenAndServe(addr, mux); err != nil {
