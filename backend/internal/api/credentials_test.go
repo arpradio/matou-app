@@ -5,27 +5,49 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"testing"
 
+	"github.com/matou-dao/backend/internal/anystore"
 	"github.com/matou-dao/backend/internal/keri"
 )
 
-func setupTestHandler(t *testing.T) *CredentialsHandler {
-	cfg := &keri.Config{
-		ContainerName: "test-container",
-		OrgName:       "test-org",
-		OrgPasscode:   "test-passcode",
-		OrgAlias:      "test-alias",
-	}
-	client, err := keri.NewClient(cfg)
+func setupTestHandler(t *testing.T) (*CredentialsHandler, func()) {
+	// Create temp directory for test database
+	tmpDir, err := os.MkdirTemp("", "credentials_test")
 	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+
+	// Create KERI client
+	keriClient, err := keri.NewClient(&keri.Config{
+		OrgAID:   "EAID123456789",
+		OrgAlias: "test-org",
+		OrgName:  "Test Organization",
+	})
+	if err != nil {
+		os.RemoveAll(tmpDir)
 		t.Fatalf("failed to create KERI client: %v", err)
 	}
-	return NewCredentialsHandler(client)
+
+	// Create anystore
+	store, err := anystore.NewLocalStore(anystore.DefaultConfig(tmpDir))
+	if err != nil {
+		os.RemoveAll(tmpDir)
+		t.Fatalf("failed to create anystore: %v", err)
+	}
+
+	cleanup := func() {
+		store.Close()
+		os.RemoveAll(tmpDir)
+	}
+
+	return NewCredentialsHandler(keriClient, store), cleanup
 }
 
 func TestHandleRoles(t *testing.T) {
-	handler := setupTestHandler(t)
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/credentials/roles", nil)
 	w := httptest.NewRecorder()
@@ -57,7 +79,8 @@ func TestHandleRoles(t *testing.T) {
 }
 
 func TestHandleRoles_MethodNotAllowed(t *testing.T) {
-	handler := setupTestHandler(t)
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/roles", nil)
 	w := httptest.NewRecorder()
@@ -69,151 +92,258 @@ func TestHandleRoles_MethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandleIssue_InvalidMethod(t *testing.T) {
-	handler := setupTestHandler(t)
+func TestHandleOrg(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/credentials/issue", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/org", nil)
 	w := httptest.NewRecorder()
 
-	handler.HandleIssue(w, req)
+	handler.HandleOrg(w, req)
 
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp keri.OrgInfo
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.AID != "EAID123456789" {
+		t.Errorf("expected AID EAID123456789, got %s", resp.AID)
+	}
+	if resp.Alias != "test-org" {
+		t.Errorf("expected alias test-org, got %s", resp.Alias)
+	}
+	if len(resp.Roles) != 8 {
+		t.Errorf("expected 8 roles, got %d", len(resp.Roles))
 	}
 }
 
-func TestHandleIssue_MissingRecipient(t *testing.T) {
-	handler := setupTestHandler(t)
+func TestHandleStore_ValidCredential(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
 
-	body := `{"role": "Member"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/issue", bytes.NewBufferString(body))
+	body := `{
+		"credential": {
+			"said": "ESAID123",
+			"issuer": "EAID123456789",
+			"recipient": "ERECIPIENT123",
+			"schema": "EMatouMembershipSchemaV1",
+			"data": {
+				"communityName": "MATOU",
+				"role": "Member",
+				"verificationStatus": "unverified",
+				"permissions": ["read", "comment"],
+				"joinedAt": "2026-01-18T00:00:00Z"
+			}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handler.HandleIssue(w, req)
+	handler.HandleStore(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	var resp StoreResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.Success {
+		t.Errorf("expected success, got error: %s", resp.Error)
+	}
+	if resp.SAID != "ESAID123" {
+		t.Errorf("expected SAID ESAID123, got %s", resp.SAID)
+	}
+}
+
+func TestHandleStore_InvalidCredential(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	body := `{
+		"credential": {
+			"said": "",
+			"issuer": "EAID123456789",
+			"recipient": "ERECIPIENT123",
+			"schema": "EMatouMembershipSchemaV1",
+			"data": {
+				"role": "Member"
+			}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleStore(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
 	}
 
-	var resp IssueResponse
+	var resp StoreResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
 	if resp.Success {
-		t.Error("expected success to be false")
-	}
-	if resp.Error == "" {
-		t.Error("expected error message")
+		t.Error("expected failure")
 	}
 }
 
-func TestHandleIssue_InvalidRole(t *testing.T) {
-	handler := setupTestHandler(t)
-
-	body := `{"recipientAid": "EAID123456789", "role": "SuperAdmin"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/issue", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.HandleIssue(w, req)
-
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
-	}
-}
-
-func TestHandleIssue_InvalidJSON(t *testing.T) {
-	handler := setupTestHandler(t)
+func TestHandleStore_InvalidJSON(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
 
 	body := `{invalid json}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/issue", bytes.NewBufferString(body))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handler.HandleIssue(w, req)
+	handler.HandleStore(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
 	}
 }
 
-func TestHandleVerify_InvalidMethod(t *testing.T) {
-	handler := setupTestHandler(t)
+func TestHandleValidate_ValidCredential(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/credentials/verify", nil)
-	w := httptest.NewRecorder()
-
-	handler.HandleVerify(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
-	}
-}
-
-func TestHandleVerify_MissingCredential(t *testing.T) {
-	handler := setupTestHandler(t)
-
-	body := `{}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/verify", bytes.NewBufferString(body))
+	body := `{
+		"credential": {
+			"said": "ESAID123",
+			"issuer": "EAID123456789",
+			"recipient": "ERECIPIENT123",
+			"schema": "EMatouMembershipSchemaV1",
+			"data": {
+				"communityName": "MATOU",
+				"role": "Admin",
+				"verificationStatus": "community_verified",
+				"permissions": ["read", "admin"],
+				"joinedAt": "2026-01-18T00:00:00Z"
+			}
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/validate", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	handler.HandleVerify(w, req)
+	handler.HandleValidate(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
-	}
-
-	var resp VerifyResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if resp.Valid {
-		t.Error("expected valid to be false")
-	}
-}
-
-func TestHandleVerify_InvalidCredentialFormat(t *testing.T) {
-	handler := setupTestHandler(t)
-
-	body := `{"credential": {"said": "", "issuer": ""}}`
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/verify", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-
-	handler.HandleVerify(w, req)
-
-	// Should return 200 with valid=false
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
 	}
 
-	var resp VerifyResponse
+	var resp ValidateResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if !resp.Valid {
+		t.Errorf("expected valid credential, got error: %s", resp.Error)
+	}
+	if !resp.OrgIssued {
+		t.Error("expected orgIssued to be true")
+	}
+	if resp.Role != "Admin" {
+		t.Errorf("expected role Admin, got %s", resp.Role)
+	}
+}
+
+func TestHandleValidate_InvalidCredential(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	body := `{
+		"credential": {
+			"said": "",
+			"issuer": ""
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/validate", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleValidate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp ValidateResponse
 	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
 
 	if resp.Valid {
-		t.Error("expected valid to be false for empty SAID")
+		t.Error("expected invalid credential")
+	}
+}
+
+func TestHandleValidate_MissingCredential(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	body := `{}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/credentials/validate", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.HandleValidate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestHandleList(t *testing.T) {
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/credentials", nil)
+	w := httptest.NewRecorder()
+
+	handler.handleList(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp ListResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if resp.Credentials == nil {
+		t.Error("expected non-nil credentials array")
 	}
 }
 
 func TestRegisterRoutes(t *testing.T) {
-	handler := setupTestHandler(t)
+	handler, cleanup := setupTestHandler(t)
+	defer cleanup()
+
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
-	// Test that routes are registered by making requests
+	// Test that routes are registered
 	paths := []struct {
 		method string
 		path   string
 	}{
+		{http.MethodGet, "/api/v1/org"},
 		{http.MethodGet, "/api/v1/credentials/roles"},
-		{http.MethodPost, "/api/v1/credentials/issue"},
-		{http.MethodPost, "/api/v1/credentials/verify"},
+		{http.MethodPost, "/api/v1/credentials"},
+		{http.MethodPost, "/api/v1/credentials/validate"},
 	}
 
 	for _, p := range paths {

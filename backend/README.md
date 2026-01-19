@@ -193,24 +193,52 @@ go test ./... -cover
 - `GET /health` - Health check with org AID
 - `GET /info` - System information
 
+### Organization
+
+- `GET /api/v1/org` - Get organization info (AID, roles, schema) for frontend
+
 ### Credentials
 
-- `GET /api/v1/credentials/roles` - List available roles and permissions
-- `POST /api/v1/credentials/issue` - Issue a membership credential
-- `POST /api/v1/credentials/verify` - Verify a credential
+**Note:** Credential issuance is handled by the frontend via signify-ts. The backend stores, retrieves, and validates credentials.
 
-#### Issue Credential
+- `GET /api/v1/credentials` - List stored credentials
+- `POST /api/v1/credentials` - Store a credential from frontend
+- `GET /api/v1/credentials/{said}` - Get credential by SAID
+- `POST /api/v1/credentials/validate` - Validate credential structure
+- `GET /api/v1/credentials/roles` - List available roles and permissions
+
+#### Get Organization Info
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/credentials/issue \
-  -H "Content-Type: application/json" \
-  -d '{"recipientAid": "EAID123...", "role": "Member"}'
+curl http://localhost:8080/api/v1/org
 ```
 
-#### Verify Credential
+#### Store Credential (from frontend)
 
 ```bash
-curl -X POST http://localhost:8080/api/v1/credentials/verify \
+curl -X POST http://localhost:8080/api/v1/credentials \
+  -H "Content-Type: application/json" \
+  -d '{
+    "credential": {
+      "said": "ESAID123...",
+      "issuer": "EORG_AID...",
+      "recipient": "EUSER_AID...",
+      "schema": "EMatouMembershipSchemaV1",
+      "data": {
+        "communityName": "MATOU",
+        "role": "Member",
+        "verificationStatus": "unverified",
+        "permissions": ["read", "comment"],
+        "joinedAt": "2026-01-18T00:00:00Z"
+      }
+    }
+  }'
+```
+
+#### Validate Credential
+
+```bash
+curl -X POST http://localhost:8080/api/v1/credentials/validate \
   -H "Content-Type: application/json" \
   -d '{"credential": {...}}'
 ```
@@ -220,10 +248,6 @@ curl -X POST http://localhost:8080/api/v1/credentials/verify \
 ```bash
 curl http://localhost:8080/api/v1/credentials/roles
 ```
-
-### Planned
-
-- `POST /api/v1/identity/create` - Create new AID via KERIA
 
 ## Bootstrap Scripts
 

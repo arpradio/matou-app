@@ -7,13 +7,14 @@ import (
 	"os"
 
 	"github.com/matou-dao/backend/internal/anysync"
+	"github.com/matou-dao/backend/internal/anystore"
 	"github.com/matou-dao/backend/internal/api"
 	"github.com/matou-dao/backend/internal/config"
 	"github.com/matou-dao/backend/internal/keri"
 )
 
 func main() {
-	fmt.Println("🚀 MATOU DAO Backend Server")
+	fmt.Println("MATOU DAO Backend Server")
 	fmt.Println("============================")
 	fmt.Println()
 
@@ -24,7 +25,7 @@ func main() {
 		log.Fatalf("Failed to load config: %v", err)
 	}
 
-	fmt.Printf("✅ Configuration loaded\n")
+	fmt.Printf("  Configuration loaded\n")
 	fmt.Printf("   Organization: %s\n", cfg.Bootstrap.Organization.Name)
 	fmt.Printf("   Org AID: %s\n", cfg.GetOrgAID())
 	fmt.Printf("   Admin AID: %s\n", cfg.GetAdminAID())
@@ -37,44 +38,48 @@ func main() {
 		log.Fatalf("Failed to create any-sync client: %v", err)
 	}
 
-	fmt.Printf("✅ any-sync client initialized\n")
+	fmt.Printf("  any-sync client initialized\n")
 	fmt.Printf("   Network ID: %s\n", anysyncClient.GetNetworkID())
 	fmt.Printf("   Coordinator: %s\n", anysyncClient.GetCoordinatorURL())
 	fmt.Println()
 
-	// Initialize KERI client
-	fmt.Println("Initializing KERI client...")
-	keriPasscode := os.Getenv("MATOU_ORG_PASSCODE")
-	if keriPasscode == "" {
-		// Try loading from file
-		if data, err := os.ReadFile("config/.org-passcode"); err == nil {
-			keriPasscode = string(data)
-		}
+	// Initialize local storage
+	fmt.Println("Initializing local storage (anystore)...")
+	dataDir := os.Getenv("MATOU_DATA_DIR")
+	if dataDir == "" {
+		dataDir = "./data"
+	}
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
-	var keriClient *keri.Client
-	var credHandler *api.CredentialsHandler
-
-	if keriPasscode != "" {
-		keriClient, err = keri.NewClient(&keri.Config{
-			ContainerName: os.Getenv("KERIA_CONTAINER"),
-			OrgName:       "matou-org",
-			OrgPasscode:   keriPasscode,
-			OrgAlias:      "matou-org",
-		})
-		if err != nil {
-			fmt.Printf("⚠️  KERI client initialization failed: %v\n", err)
-			fmt.Println("   Credential endpoints will be disabled")
-		} else {
-			fmt.Printf("✅ KERI client initialized\n")
-			credHandler = api.NewCredentialsHandler(keriClient)
-		}
-	} else {
-		fmt.Println("⚠️  KERI passcode not configured")
-		fmt.Println("   Set MATOU_ORG_PASSCODE or create config/.org-passcode")
-		fmt.Println("   Credential endpoints will be disabled")
+	store, err := anystore.NewLocalStore(anystore.DefaultConfig(dataDir))
+	if err != nil {
+		log.Fatalf("Failed to create local store: %v", err)
 	}
+	defer store.Close()
+
+	fmt.Printf("  Local storage initialized\n")
+	fmt.Printf("   Data directory: %s\n", dataDir)
 	fmt.Println()
+
+	// Initialize KERI client (config-only, no KERIA connection needed)
+	fmt.Println("Initializing KERI client...")
+	keriClient, err := keri.NewClient(&keri.Config{
+		OrgAID:   cfg.GetOrgAID(),
+		OrgAlias: cfg.Bootstrap.Organization.Alias,
+		OrgName:  cfg.Bootstrap.Organization.Name,
+	})
+	if err != nil {
+		log.Fatalf("Failed to create KERI client: %v", err)
+	}
+
+	fmt.Printf("  KERI client initialized\n")
+	fmt.Printf("   Note: Credential issuance handled by frontend (signify-ts)\n")
+	fmt.Println()
+
+	// Create credentials handler
+	credHandler := api.NewCredentialsHandler(keriClient, store)
 
 	// Create HTTP server
 	mux := http.NewServeMux()
@@ -116,23 +121,22 @@ func main() {
 		)
 	})
 
-	// Register credential endpoints if KERI client is available
-	if credHandler != nil {
-		credHandler.RegisterRoutes(mux)
-	}
+	// Register credential endpoints
+	credHandler.RegisterRoutes(mux)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
-	fmt.Printf("🌐 Starting HTTP server on %s\n", addr)
+	fmt.Printf("Starting HTTP server on %s\n", addr)
 	fmt.Println()
 	fmt.Println("Endpoints:")
-	fmt.Println("  GET  /health                    - Health check")
-	fmt.Println("  GET  /info                      - System information")
-	if credHandler != nil {
-		fmt.Println("  GET  /api/v1/credentials/roles  - List available roles")
-		fmt.Println("  POST /api/v1/credentials/issue  - Issue a credential")
-		fmt.Println("  POST /api/v1/credentials/verify - Verify a credential")
-	}
+	fmt.Println("  GET  /health                     - Health check")
+	fmt.Println("  GET  /info                       - System information")
+	fmt.Println("  GET  /api/v1/org                 - Organization info for frontend")
+	fmt.Println("  GET  /api/v1/credentials         - List stored credentials")
+	fmt.Println("  POST /api/v1/credentials         - Store credential from frontend")
+	fmt.Println("  GET  /api/v1/credentials/{said}  - Get credential by SAID")
+	fmt.Println("  POST /api/v1/credentials/validate - Validate credential structure")
+	fmt.Println("  GET  /api/v1/credentials/roles   - List available roles")
 	fmt.Println()
 
 	if err := http.ListenAndServe(addr, mux); err != nil {

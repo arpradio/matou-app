@@ -98,34 +98,25 @@ func TestNewClient(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "missing org name",
+			name: "missing org AID",
 			cfg: &Config{
-				OrgPasscode: "test-passcode",
+				OrgAlias: "test-alias",
 			},
 			wantErr: true,
 		},
 		{
-			name: "missing passcode",
+			name: "valid config with AID only",
 			cfg: &Config{
-				OrgName: "test-org",
-			},
-			wantErr: true,
-		},
-		{
-			name: "valid config",
-			cfg: &Config{
-				OrgName:     "test-org",
-				OrgPasscode: "test-passcode",
+				OrgAID: "EAID123456789",
 			},
 			wantErr: false,
 		},
 		{
 			name: "valid config with all fields",
 			cfg: &Config{
-				ContainerName: "custom-container",
-				OrgName:       "test-org",
-				OrgPasscode:   "test-passcode",
-				OrgAlias:      "custom-alias",
+				OrgAID:   "EAID123456789",
+				OrgAlias: "custom-alias",
+				OrgName:  "Custom Org",
 			},
 			wantErr: false,
 		},
@@ -145,25 +136,165 @@ func TestNewClient(t *testing.T) {
 	}
 }
 
-func TestCredentialDataValidation(t *testing.T) {
-	cfg := &Config{
-		OrgName:     "test-org",
-		OrgPasscode: "test-passcode",
-	}
-	client, err := NewClient(cfg)
+func TestGetOrgInfo(t *testing.T) {
+	client, err := NewClient(&Config{
+		OrgAID:   "EAID123456789",
+		OrgAlias: "test-org",
+		OrgName:  "Test Organization",
+	})
 	if err != nil {
 		t.Fatalf("NewClient() error = %v", err)
 	}
 
-	// Test invalid role
-	_, err = client.IssueCredential("EAID123456789", "InvalidRole", nil)
-	if err == nil {
-		t.Error("IssueCredential() should fail with invalid role")
+	info := client.GetOrgInfo()
+	if info.AID != "EAID123456789" {
+		t.Errorf("expected AID EAID123456789, got %s", info.AID)
+	}
+	if info.Alias != "test-org" {
+		t.Errorf("expected alias test-org, got %s", info.Alias)
+	}
+	if info.Name != "Test Organization" {
+		t.Errorf("expected name Test Organization, got %s", info.Name)
+	}
+	if len(info.Roles) != 8 {
+		t.Errorf("expected 8 roles, got %d", len(info.Roles))
+	}
+}
+
+func TestValidateCredential(t *testing.T) {
+	client, _ := NewClient(&Config{OrgAID: "EAID123456789"})
+
+	tests := []struct {
+		name    string
+		cred    *Credential
+		wantErr bool
+	}{
+		{
+			name:    "nil credential",
+			cred:    nil,
+			wantErr: true,
+		},
+		{
+			name:    "empty credential",
+			cred:    &Credential{},
+			wantErr: true,
+		},
+		{
+			name: "missing SAID",
+			cred: &Credential{
+				Issuer:    "issuer",
+				Recipient: "recipient",
+				Schema:    "schema",
+				Data:      CredentialData{Role: "Member"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid role",
+			cred: &Credential{
+				SAID:      "said",
+				Issuer:    "issuer",
+				Recipient: "recipient",
+				Schema:    "schema",
+				Data:      CredentialData{Role: "InvalidRole"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid credential",
+			cred: &Credential{
+				SAID:      "ESAID123",
+				Issuer:    "EAID123456789",
+				Recipient: "ERECIPIENT123",
+				Schema:    "EMatouMembershipSchemaV1",
+				Data: CredentialData{
+					CommunityName:      "MATOU",
+					Role:               "Member",
+					VerificationStatus: "unverified",
+					Permissions:        []string{"read", "comment"},
+					JoinedAt:           "2026-01-18T00:00:00Z",
+				},
+			},
+			wantErr: false,
+		},
 	}
 
-	// Test empty recipient
-	_, err = client.IssueCredential("", "Member", nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := client.ValidateCredential(tt.cred)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCredential() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestIsOrgIssued(t *testing.T) {
+	client, _ := NewClient(&Config{OrgAID: "EAID123456789"})
+
+	tests := []struct {
+		name     string
+		cred     *Credential
+		expected bool
+	}{
+		{
+			name:     "nil credential",
+			cred:     nil,
+			expected: false,
+		},
+		{
+			name: "different issuer",
+			cred: &Credential{
+				Issuer: "OTHER_AID",
+			},
+			expected: false,
+		},
+		{
+			name: "matching issuer",
+			cred: &Credential{
+				Issuer: "EAID123456789",
+			},
+			expected: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := client.IsOrgIssued(tt.cred); got != tt.expected {
+				t.Errorf("IsOrgIssued() = %v, want %v", got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestValidateCredentialJSON(t *testing.T) {
+	client, _ := NewClient(&Config{OrgAID: "EAID123456789"})
+
+	validJSON := `{
+		"said": "ESAID123",
+		"issuer": "EAID123456789",
+		"recipient": "ERECIPIENT123",
+		"schema": "EMatouMembershipSchemaV1",
+		"data": {
+			"communityName": "MATOU",
+			"role": "Member",
+			"verificationStatus": "unverified",
+			"permissions": ["read", "comment"],
+			"joinedAt": "2026-01-18T00:00:00Z"
+		}
+	}`
+
+	cred, err := client.ValidateCredentialJSON(validJSON)
+	if err != nil {
+		t.Fatalf("ValidateCredentialJSON() error = %v", err)
+	}
+	if cred.SAID != "ESAID123" {
+		t.Errorf("expected SAID ESAID123, got %s", cred.SAID)
+	}
+
+	// Test invalid JSON
+	_, err = client.ValidateCredentialJSON("{invalid}")
 	if err == nil {
-		t.Error("IssueCredential() should fail with empty recipient")
+		t.Error("expected error for invalid JSON")
 	}
 }
