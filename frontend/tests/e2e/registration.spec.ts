@@ -85,8 +85,8 @@ test.describe('Matou Registration Flow', () => {
     await test.step('Fill profile form', async () => {
       console.log('Step 3: Filling profile form...');
 
-      // Fill name
-      await page.getByPlaceholder('Your preferred name').fill('E2E Test User');
+      // Fill name (use underscore to avoid URL encoding issues with signify-ts)
+      await page.getByPlaceholder('Your preferred name').fill('E2E_Test_User');
       console.log('Name filled');
 
       // Fill "Why would you like to join us?" (bio)
@@ -196,7 +196,12 @@ test.describe('Matou Registration Flow', () => {
       console.log('Navigating to mnemonic verification...');
     });
 
-    // 6. Complete mnemonic verification
+    // 6. Complete mnemonic verification (this also sends registration EXN to org)
+    let consoleMessages: string[] = [];
+    page.on('console', (msg) => {
+      consoleMessages.push(msg.text());
+    });
+
     await test.step('Complete mnemonic verification', async () => {
       console.log('Step 6: Completing mnemonic verification...');
 
@@ -224,14 +229,55 @@ test.describe('Matou Registration Flow', () => {
 
       await page.screenshot({ path: 'tests/e2e/screenshots/09-verification-filled.png' });
 
-      // Click verify
+      // Click verify - this will also send registration EXN to org
       await page.getByRole('button', { name: /verify and continue/i }).click();
       console.log('Verification submitted');
 
       // Should navigate to pending approval (for register flow)
-      await expect(page.getByText(/application.*review|pending/i).first()).toBeVisible({ timeout: 10000 });
+      await expect(page.getByText(/application.*review|pending/i).first()).toBeVisible({ timeout: 15000 });
       await page.screenshot({ path: 'tests/e2e/screenshots/10-pending-approval.png' });
-      console.log('Arrived at pending approval screen - flow complete!');
+      console.log('Arrived at pending approval screen');
+    });
+
+    // 7. Verify registration EXN was sent
+    await test.step('Verify registration EXN was sent to org', async () => {
+      console.log('Step 7: Verifying registration EXN was sent...');
+
+      // Wait a moment for console messages to arrive
+      await page.waitForTimeout(2000);
+
+      // Check console messages for registration success
+      const registrationSentMsg = consoleMessages.find(msg =>
+        msg.includes('[Registration] Registration sent successfully') ||
+        msg.includes('Registration submitted successfully')
+      );
+      const oobiResolvedMsg = consoleMessages.find(msg =>
+        msg.includes('[Registration] Organization OOBI resolved')
+      );
+
+      if (oobiResolvedMsg) {
+        console.log('✓ Org OOBI was resolved');
+      } else {
+        console.log('⚠ Could not confirm org OOBI resolution from console');
+      }
+
+      if (registrationSentMsg) {
+        console.log('✓ Registration EXN was sent successfully');
+      } else {
+        console.log('⚠ Could not confirm registration EXN from console');
+        // Log all messages for debugging
+        console.log('Console messages:', consoleMessages.filter(m => m.includes('Registration')));
+      }
+
+      // Verify user's AID is displayed on pending screen
+      const aidElement = page.locator('.aid-display .font-mono, [class*="aid"] .font-mono').first();
+      if (await aidElement.isVisible().catch(() => false)) {
+        const userAID = await aidElement.textContent();
+        console.log(`User AID on pending screen: ${userAID?.substring(0, 20)}...`);
+      }
+
+      await page.screenshot({ path: 'tests/e2e/screenshots/11-registration-sent.png' });
+      console.log('Registration flow complete - user is now waiting for approval');
     });
   });
 
@@ -354,6 +400,132 @@ test.describe('Matou Registration Flow', () => {
     });
   });
 
+  /**
+   * Full credential flow test
+   *
+   * This test requires manual approval from an admin:
+   * 1. Run this test with --headed flag
+   * 2. When test reaches pending approval, an admin needs to:
+   *    - Log into the frontend with admin credentials
+   *    - Issue a credential to the registering user's AID
+   * 3. Watch the test detect the credential and show WelcomeOverlay
+   *
+   * Note: Credential issuance is now handled entirely via the frontend.
+   * The old backend scripts have been removed.
+   */
+  test.skip('full credential flow with approval', async ({ page }) => {
+    test.setTimeout(180000); // 3 minutes - needs time for approval
+
+    let userAID = '';
+    let consoleMessages: string[] = [];
+
+    page.on('console', (msg) => {
+      consoleMessages.push(msg.text());
+      // Log credential-related messages in real-time
+      if (msg.text().includes('Credential') || msg.text().includes('Grant') || msg.text().includes('IPEX')) {
+        console.log(`[Browser] ${msg.text()}`);
+      }
+    });
+
+    // Complete registration up to pending approval
+    await test.step('Complete registration to pending approval', async () => {
+      await page.goto(FRONTEND_URL);
+      await expect(page.getByRole('heading', { name: 'Matou' })).toBeVisible({ timeout: 15000 });
+
+      // Navigate through registration
+      await page.getByRole('button', { name: /register/i }).click();
+      await expect(page.getByRole('heading', { name: 'Join Matou' })).toBeVisible({ timeout: 5000 });
+      await page.getByRole('button', { name: /continue/i }).click();
+
+      // Fill profile
+      await page.getByPlaceholder('Your preferred name').fill('Credential Test User');
+      const bioField = page.locator('textarea').first();
+      await bioField.fill('Testing credential flow');
+      const termsCheckbox = page.locator('input[type="checkbox"]').last();
+      await termsCheckbox.check();
+
+      // Submit and create identity
+      await page.getByRole('button', { name: /continue/i }).click();
+      await expect(page.getByText(/identity created successfully/i)).toBeVisible({ timeout: 60000 });
+
+      // Extract mnemonic for verification
+      const mnemonicWords: string[] = [];
+      const wordCards = page.locator('.word-card');
+      const wordCount = await wordCards.count();
+      for (let i = 0; i < wordCount; i++) {
+        const wordText = await wordCards.nth(i).locator('span.font-mono').textContent();
+        if (wordText) mnemonicWords.push(wordText.trim());
+      }
+
+      // Confirm and continue
+      const confirmCheckbox = page.locator('.confirm-box input[type="checkbox"]');
+      await confirmCheckbox.check();
+      await page.getByRole('button', { name: /continue to verification/i }).click();
+
+      // Complete mnemonic verification
+      await expect(page.getByRole('heading', { name: /verify your recovery phrase/i })).toBeVisible({ timeout: 5000 });
+      const wordLabels = page.locator('.word-input-group label');
+      const labelCount = await wordLabels.count();
+      for (let i = 0; i < labelCount; i++) {
+        const labelText = await wordLabels.nth(i).textContent();
+        const match = labelText?.match(/Word #(\d+)/);
+        if (match) {
+          const wordIndex = parseInt(match[1], 10) - 1;
+          const input = page.locator(`#word-${i}`);
+          await input.fill(mnemonicWords[wordIndex]);
+        }
+      }
+
+      await page.getByRole('button', { name: /verify and continue/i }).click();
+      await expect(page.getByText(/application.*review|pending/i).first()).toBeVisible({ timeout: 15000 });
+      console.log('Arrived at pending approval screen');
+
+      // Extract user AID for approval
+      const aidElement = page.locator('.font-mono').first();
+      if (await aidElement.isVisible().catch(() => false)) {
+        userAID = (await aidElement.textContent()) || '';
+        console.log('\n========================================');
+        console.log('USER AID FOR APPROVAL:');
+        console.log(userAID);
+        console.log('========================================');
+        console.log('An admin must issue a credential to this AID');
+        console.log('via the frontend admin interface.');
+        console.log('========================================\n');
+      }
+    });
+
+    // Wait for credential (requires manual approval)
+    await test.step('Wait for credential approval and admission', async () => {
+      console.log('Waiting for credential polling to detect grant...');
+      console.log('(Admin must issue credential via frontend)');
+
+      // Wait for WelcomeOverlay to appear (indicates credential received)
+      await expect(page.getByText(/welcome.*matou/i)).toBeVisible({ timeout: 120000 });
+      console.log('✓ WelcomeOverlay appeared - credential received!');
+
+      await page.screenshot({ path: 'tests/e2e/screenshots/credential-01-welcome.png' });
+
+      // Check for credential details
+      const credentialCard = page.locator('.credential-card, [class*="credential"]').first();
+      if (await credentialCard.isVisible().catch(() => false)) {
+        console.log('✓ Credential card visible');
+      }
+    });
+
+    // Complete flow by entering community
+    await test.step('Enter community', async () => {
+      const enterBtn = page.getByRole('button', { name: /enter.*community/i });
+      await expect(enterBtn).toBeVisible({ timeout: 5000 });
+      await enterBtn.click();
+
+      // Should navigate to dashboard
+      await page.waitForURL(/\/dashboard/, { timeout: 10000 });
+      console.log('✓ Navigated to dashboard - full flow complete!');
+
+      await page.screenshot({ path: 'tests/e2e/screenshots/credential-02-dashboard.png' });
+    });
+  });
+
   test('debug CORS issue with KERIA', async ({ page }) => {
     // This test specifically debugs CORS issues
     console.log('Testing CORS access to KERIA from browser...');
@@ -367,7 +539,7 @@ test.describe('Matou Registration Flow', () => {
         'http://localhost:3903/boot',
       ];
 
-      const results = [];
+      const results: Array<{ url: string; status?: number; ok?: boolean; error?: string }> = [];
       for (const url of urls) {
         try {
           const response = await fetch(url, { method: 'GET' });

@@ -272,30 +272,29 @@ cd infrastructure/scripts
 python3 schema-server.py --port 7723
 ```
 
-## Bootstrap Scripts
+## Infrastructure Scripts
 
 Located in `infrastructure/scripts/`:
 
 | Script | Purpose |
 |--------|---------|
-| `bootstrap-keria.py` | Create Organization AID in KERIA |
-| `issue-credentials.py` | Issue ACDC credentials to users |
-| `schema-server.py` | Serve schemas for OOBI resolution |
+| `schema-server.py` | Serve ACDC schemas for OOBI resolution |
 
-### Issue Credentials
+Located in `infrastructure/keri/scripts/`:
 
-After admin creates their identity in the frontend:
+| Script | Purpose |
+|--------|---------|
+| `config-server.py` | Store and serve org configuration |
 
-```bash
-# 1. Start schema server (if not running)
-python3 infrastructure/scripts/schema-server.py &
+### Organization Setup
 
-# 2. Issue credential
-python3 infrastructure/scripts/issue-credentials.py \
-  --recipient <ADMIN_AID> \
-  --role "Operations Steward" \
-  --acdc
-```
+Organization setup is now done via the frontend:
+
+1. Start KERI infrastructure: `cd infrastructure/keri && make up`
+2. Start frontend: `cd frontend && npm run dev`
+3. Navigate to the app - you'll be redirected to `/setup` if no org exists
+4. Fill in org name and admin name
+5. The frontend creates: org AID, admin AID, registry, and first admin credential
 
 ## Troubleshooting
 

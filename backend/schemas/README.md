@@ -7,7 +7,7 @@ This directory contains ACDC (Authentic Chained Data Containers) schemas for MAT
 1. Create a new `.json` schema file in this directory
 2. SAIDify it (see below)
 3. Restart the schema server - it automatically loads all schemas from this folder
-4. Update `issue-credentials.py` with the new SAID if needed
+4. Update the frontend credential issuance code with the new SAID if needed
 
 ## Understanding SAIDs
 
@@ -125,7 +125,7 @@ curl http://localhost:7723/
 
 ### Step 5: Use in Credential Issuance
 
-Update `infrastructure/scripts/issue-credentials.py` to use your new schema, or create a new issuance script referencing your schema's SAID.
+Update the frontend credential issuance code (`frontend/src/composables/useOrgSetup.ts` or similar) to use your new schema SAID.
 
 ---
 
@@ -156,10 +156,11 @@ grep '"\$id"' backend/schemas/matou-membership-schema.json
 
 ### Step 4: Update References
 
-Update `SCHEMA_SAID` in `infrastructure/scripts/issue-credentials.py`:
+Update `SCHEMA_SAID` in the frontend credential issuance code:
 
-```python
-SCHEMA_SAID = "EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT"  # Your new SAID
+```typescript
+// In frontend/src/lib/keri/client.ts or similar
+const SCHEMA_SAID = "EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT";  // Your new SAID
 ```
 
 ### Step 5: Restart Schema Server
