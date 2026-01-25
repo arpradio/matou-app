@@ -75,6 +75,89 @@ test.describe('Matou Organization Setup Flow', () => {
     });
   });
 
+  test('form validation works correctly', async ({ page, request }) => {
+    test.setTimeout(60000);
+
+    // Ensure we're on setup page
+    await test.step('Navigate to setup', async () => {
+      try {
+        await request.delete(`${CONFIG_SERVER_URL}/api/config`);
+      } catch { /* ignore */ }
+
+      await page.goto(`${FRONTEND_URL}/#/setup`);
+      await page.evaluate(() => localStorage.clear());
+      await page.reload();
+
+      await expect(page.getByRole('heading', { name: /community setup/i })).toBeVisible({ timeout: 10000 });
+    });
+
+    await test.step('Verify form validation', async () => {
+      const submitBtn = page.getByRole('button', { name: /create organization/i });
+
+      // Button should be disabled when form is empty
+      await expect(submitBtn).toBeDisabled();
+
+      // Fill just one field with short value
+      const orgNameInput = page.locator('input').first();
+      await orgNameInput.fill('T');
+
+      // Button should still be disabled
+      await expect(submitBtn).toBeDisabled();
+
+      // Fill both fields with valid values
+      await orgNameInput.fill('Test Org');
+      const adminNameInput = page.locator('input').nth(1);
+      await adminNameInput.fill('Admin');
+
+      // Button should now be enabled
+      await expect(submitBtn).toBeEnabled();
+    });
+  });
+
+  test('handles config appropriately after localStorage clear', async ({ page }) => {
+    test.setTimeout(30000);
+
+    // This test verifies the app works correctly when localStorage is cleared
+    // The config server may or may not have config depending on previous test state
+
+    await test.step('Clear localStorage cache', async () => {
+      await page.goto(FRONTEND_URL);
+      await page.evaluate(() => {
+        localStorage.removeItem('matou_org_config');
+        localStorage.removeItem('matou_passcode');
+        localStorage.removeItem('matou_admin_aid');
+        localStorage.removeItem('matou_org_aid');
+      });
+    });
+
+    // If server is running and not configured, we should see setup page
+    // If server is running and configured, we should see splash
+    await test.step('Verify app handles config appropriately', async () => {
+      await page.reload();
+      await page.waitForLoadState('networkidle');
+
+      // Wait for either setup or splash to be visible with longer timeout
+      try {
+        await Promise.race([
+          page.getByRole('heading', { name: /community setup/i }).waitFor({ timeout: 10000 }),
+          page.getByRole('heading', { name: 'Matou' }).waitFor({ timeout: 10000 }),
+        ]);
+      } catch {
+        // Take screenshot for debugging if neither appears
+        await page.screenshot({ path: 'tests/e2e/screenshots/org-setup-debug-config-handling.png' });
+      }
+
+      // Check which one is visible
+      const isOnSetup = await page.getByRole('heading', { name: /community setup/i }).isVisible().catch(() => false);
+      const isOnSplash = await page.getByRole('heading', { name: 'Matou' }).isVisible().catch(() => false);
+
+      expect(isOnSetup || isOnSplash).toBe(true);
+      console.log(`App loaded: ${isOnSetup ? 'setup page' : 'splash page'}`);
+    });
+  });
+
+  // NOTE: This test MUST run last in the suite because it creates the org config
+  // that the registration tests depend on. Tests that clear config are ordered above.
   test('complete org setup flow', async ({ page, request }) => {
     test.setTimeout(180000); // 3 minutes for full KERI operations
 
@@ -293,87 +376,6 @@ test.describe('Matou Organization Setup Flow', () => {
       expect(cachedConfig).not.toBeNull();
       expect(cachedConfig.organization.name).toBe('Matou Community');
       console.log('LocalStorage cache verified');
-    });
-  });
-
-  test('handles config appropriately after localStorage clear', async ({ page }) => {
-    test.setTimeout(30000);
-
-    // This test verifies the app works correctly when localStorage is cleared
-    // The config server may or may not have config depending on previous test state
-
-    await test.step('Clear localStorage cache', async () => {
-      await page.goto(FRONTEND_URL);
-      await page.evaluate(() => {
-        localStorage.removeItem('matou_org_config');
-        localStorage.removeItem('matou_passcode');
-        localStorage.removeItem('matou_admin_aid');
-        localStorage.removeItem('matou_org_aid');
-      });
-    });
-
-    // If server is running and not configured, we should see setup page
-    // If server is running and configured, we should see splash
-    await test.step('Verify app handles config appropriately', async () => {
-      await page.reload();
-      await page.waitForLoadState('networkidle');
-
-      // Wait for either setup or splash to be visible with longer timeout
-      try {
-        await Promise.race([
-          page.getByRole('heading', { name: /community setup/i }).waitFor({ timeout: 10000 }),
-          page.getByRole('heading', { name: 'Matou' }).waitFor({ timeout: 10000 }),
-        ]);
-      } catch {
-        // Take screenshot for debugging if neither appears
-        await page.screenshot({ path: 'tests/e2e/screenshots/org-setup-debug-config-handling.png' });
-      }
-
-      // Check which one is visible
-      const isOnSetup = await page.getByRole('heading', { name: /community setup/i }).isVisible().catch(() => false);
-      const isOnSplash = await page.getByRole('heading', { name: 'Matou' }).isVisible().catch(() => false);
-
-      expect(isOnSetup || isOnSplash).toBe(true);
-      console.log(`App loaded: ${isOnSetup ? 'setup page' : 'splash page'}`);
-    });
-  });
-
-  test('form validation works correctly', async ({ page, request }) => {
-    test.setTimeout(60000);
-
-    // Ensure we're on setup page
-    await test.step('Navigate to setup', async () => {
-      try {
-        await request.delete(`${CONFIG_SERVER_URL}/api/config`);
-      } catch { /* ignore */ }
-
-      await page.goto(`${FRONTEND_URL}/#/setup`);
-      await page.evaluate(() => localStorage.clear());
-      await page.reload();
-
-      await expect(page.getByRole('heading', { name: /community setup/i })).toBeVisible({ timeout: 10000 });
-    });
-
-    await test.step('Verify form validation', async () => {
-      const submitBtn = page.getByRole('button', { name: /create organization/i });
-
-      // Button should be disabled when form is empty
-      await expect(submitBtn).toBeDisabled();
-
-      // Fill just one field with short value
-      const orgNameInput = page.locator('input').first();
-      await orgNameInput.fill('T');
-
-      // Button should still be disabled
-      await expect(submitBtn).toBeDisabled();
-
-      // Fill both fields with valid values
-      await orgNameInput.fill('Test Org');
-      const adminNameInput = page.locator('input').nth(1);
-      await adminNameInput.fill('Admin');
-
-      // Button should now be enabled
-      await expect(submitBtn).toBeEnabled();
     });
   });
 });
