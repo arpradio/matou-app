@@ -13,6 +13,8 @@
         @complete="handleComplete"
         @show-phrase-again="handleShowPhraseAgain"
         @retry="handleRetry"
+        @approved="handleApproved"
+        @continue-to-dashboard="handleContinueToDashboard"
       />
     </Transition>
   </q-page>
@@ -74,11 +76,24 @@ const currentProps = computed(() => {
     case 'credential-issuance':
       return { userAID: store.userAID };
     case 'pending-approval':
-      return { userName: store.profile.name || 'Member' };
+      return {
+        userName: store.profile.name || 'Member',
+        onApproved: handleApproved,
+        onContinueToDashboard: handleContinueToDashboard,
+      };
     default:
       return {};
   }
 });
+
+// Credential approval handlers
+const handleApproved = (credential: any) => {
+  console.log('[Onboarding] Credential approved:', credential);
+};
+
+const handleContinueToDashboard = () => {
+  store.navigateTo('main');
+};
 
 // Navigation handlers
 const startInviteFlow = () => {
@@ -138,6 +153,16 @@ const handleContinue = (data?: unknown) => {
     if (current === 'recovery') {
       store.navigateTo('main');
     }
+  } else if (path === 'setup') {
+    // Admin setup flow: profile-confirmation → mnemonic-verification → pending-approval
+    const forwardMap: Record<string, string> = {
+      'profile-confirmation': 'mnemonic-verification',
+      'mnemonic-verification': 'pending-approval',
+    };
+    const next = forwardMap[current];
+    if (next) {
+      store.navigateTo(next as typeof store.currentScreen);
+    }
   }
 };
 
@@ -165,7 +190,18 @@ const handleBack = () => {
     'recovery': 'splash',
   };
 
-  const backMap = path === 'invite' ? backMapInvite : path === 'recover' ? backMapRecover : backMapRegister;
+  const backMapSetup: Record<string, string | null> = {
+    'mnemonic-verification': 'profile-confirmation',
+    // No back from profile-confirmation in setup flow (can't go back to setup form)
+  };
+
+  const backMap = path === 'invite'
+    ? backMapInvite
+    : path === 'recover'
+      ? backMapRecover
+      : path === 'setup'
+        ? backMapSetup
+        : backMapRegister;
   const prev = backMap[current];
 
   if (prev === 'splash') {

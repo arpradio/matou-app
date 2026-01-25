@@ -3,8 +3,12 @@
  * Creates admin AID, org group AID, registry, and issues initial credential
  */
 import { ref } from 'vue';
+import { generateMnemonic } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { KERIClient, useKERIClient } from 'src/lib/keri/client';
 import { saveOrgConfig, type OrgConfig } from 'src/api/config';
+import { useOnboardingStore } from 'stores/onboarding';
+import { useIdentityStore } from 'stores/identity';
 
 export interface OrgSetupConfig {
   orgName: string;
@@ -16,6 +20,7 @@ export interface OrgSetupResult {
   orgAid: string;
   registryId: string;
   credentialSaid: string;
+  mnemonic: string[];
 }
 
 // Membership credential schema SAID (from schema server)
@@ -41,11 +46,16 @@ export function useOrgSetup() {
     error.value = null;
     progress.value = '';
 
+    const onboardingStore = useOnboardingStore();
+    const identityStore = useIdentityStore();
+
     try {
-      // Step 1: Generate admin passcode and boot agent
+      // Step 1: Generate mnemonic and derive passcode
       progress.value = 'Generating admin credentials...';
-      const adminPasscode = KERIClient.generatePasscode();
-      console.log('[OrgSetup] Generated admin passcode');
+      const mnemonic = generateMnemonic(wordlist, 128); // 12 words
+      const mnemonicWords = mnemonic.split(' ');
+      const adminPasscode = KERIClient.passcodeFromMnemonic(mnemonic);
+      console.log('[OrgSetup] Generated mnemonic and derived passcode');
 
       // Step 2: Initialize KERIA connection (boots agent if new)
       progress.value = 'Connecting to KERIA...';
@@ -57,6 +67,9 @@ export function useOrgSetup() {
       const adminAidName = `${config.adminName.toLowerCase().replace(/\s+/g, '-')}-admin`;
       const adminAid = await keriClient.createAID(adminAidName);
       console.log('[OrgSetup] Created admin AID:', adminAid.prefix);
+
+      // Store admin AID in identity store for credential polling
+      identityStore.setCurrentAID(adminAid);
 
       // Step 4: Create org AID as group with admin as master
       progress.value = 'Creating organization identity...';
@@ -145,12 +158,18 @@ export function useOrgSetup() {
       // Update the KERI client with the new org AID
       keriClient.setOrgAID(orgAid.prefix);
 
+      // Store mnemonic in onboarding store for display/verification
+      onboardingStore.setMnemonic(mnemonicWords);
+      onboardingStore.setUserAID(adminAid.prefix);
+      onboardingStore.updateProfile({ name: config.adminName });
+
       // Store result
       result.value = {
         adminAid: adminAid.prefix,
         orgAid: orgAid.prefix,
         registryId,
         credentialSaid: credential.said,
+        mnemonic: mnemonicWords,
       };
 
       progress.value = 'Setup complete!';

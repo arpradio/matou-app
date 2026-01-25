@@ -124,11 +124,17 @@
       <div class="max-w-2xl mx-auto">
         <MBtn
           class="w-full h-12 text-base rounded-xl"
-          :disabled="!canVerify"
+          :disabled="!canVerify || isSubmitting"
           @click="handleVerify"
         >
-          Verify and Continue
-          <ArrowRight class="w-4 h-4 ml-2" />
+          <template v-if="isSubmitting">
+            <Loader2 class="w-4 h-4 mr-2 animate-spin" />
+            Submitting Registration...
+          </template>
+          <template v-else>
+            Verify and Continue
+            <ArrowRight class="w-4 h-4 ml-2" />
+          </template>
         </MBtn>
         <p class="text-xs text-muted-foreground text-center mt-3">
           Make sure you've saved your recovery phrase before continuing
@@ -147,11 +153,14 @@ import {
   CheckCircle2,
   XCircle,
   AlertTriangle,
+  Loader2,
 } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
 import { useOnboardingStore } from 'stores/onboarding';
+import { useRegistration } from 'composables/useRegistration';
 
 const store = useOnboardingStore();
+const { isSubmitting, error: registrationError, submitRegistration } = useRegistration();
 
 const userInputs = ref<string[]>(['', '', '']);
 const errors = ref<boolean[]>([false, false, false]);
@@ -188,8 +197,8 @@ function clearError(index: number) {
   verificationError.value = '';
 }
 
-function handleVerify() {
-  if (!canVerify.value) return;
+async function handleVerify() {
+  if (!canVerify.value || isSubmitting.value) return;
 
   verificationError.value = '';
   let allCorrect = true;
@@ -210,8 +219,29 @@ function handleVerify() {
   });
 
   if (allCorrect) {
-    // Success!
+    // Mnemonic verified! Now send registration to org
     store.recordVerificationAttempt(true);
+
+    // Only send registration for the 'register' path (not invite or setup paths)
+    // Setup path = admin already has credential issued, invite path = already invited
+    if (store.onboardingPath === 'register') {
+      console.log('[MnemonicVerification] Sending registration to org...');
+
+      const success = await submitRegistration({
+        name: store.profile.name,
+        bio: store.profile.bio,
+        interests: store.profile.participationInterests,
+        customInterests: store.profile.customInterests,
+      });
+
+      if (!success) {
+        verificationError.value = registrationError.value || 'Failed to submit registration. Please try again.';
+        return;
+      }
+
+      console.log('[MnemonicVerification] Registration sent successfully');
+    }
+
     emit('continue');
   } else {
     // Record failed attempt

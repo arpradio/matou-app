@@ -36,9 +36,20 @@ export const useIdentityStore = defineStore('identity', () => {
 
       // Check for existing AIDs (don't fail if this errors - new users won't have any)
       try {
+        // Log the controller/agent info
+        const client = keriClient.getSignifyClient();
+        if (client) {
+          const agent = client.agent;
+          console.log('[IdentityStore] Connected as agent/controller:', agent);
+        }
+
         const aids = await keriClient.listAIDs();
+        console.log('[IdentityStore] Listed AIDs from KERIA:', JSON.stringify(aids, null, 2));
         if (aids.length > 0) {
           currentAID.value = aids[0];
+          console.log('[IdentityStore] Set currentAID to:', aids[0].prefix);
+        } else {
+          console.log('[IdentityStore] No AIDs found in KERIA for this agent');
         }
       } catch (listErr) {
         console.warn('[IdentityStore] Could not list AIDs (expected for new users):', listErr);
@@ -105,6 +116,13 @@ export const useIdentityStore = defineStore('identity', () => {
     localStorage.removeItem('matou_passcode');
   }
 
+  /**
+   * Set the current AID directly (used by org setup)
+   */
+  function setCurrentAID(aid: AIDInfo) {
+    currentAID.value = aid;
+  }
+
   return {
     // State
     currentAID,
@@ -127,5 +145,6 @@ export const useIdentityStore = defineStore('identity', () => {
     disconnect,
     setInitialized,
     setInitError,
+    setCurrentAID,
   };
 });

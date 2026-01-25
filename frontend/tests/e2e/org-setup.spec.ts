@@ -138,20 +138,106 @@ test.describe('Matou Organization Setup Flow', () => {
       console.log('Waiting for KERI operations...');
 
       // This may take a while - wait for completion
-      // The UI shows "Setup complete!" briefly then redirects to splash
-      // Wait for either completion text or redirect to splash
       console.log('Waiting for setup to complete...');
 
-      // Wait for redirect to main app (setup complete will redirect)
+      // Wait for redirect to main app (setup complete will redirect to profile-confirmation)
       await expect(page).toHaveURL(/#\/$/, { timeout: 120000 });
       console.log('Setup completed and redirected!');
 
-      // Should see splash screen
-      await expect(page.getByRole('heading', { name: 'Matou' })).toBeVisible({ timeout: 10000 });
-      await page.screenshot({ path: 'tests/e2e/screenshots/org-setup-05-complete.png' });
+      // Should see profile-confirmation screen with recovery phrase
+      await expect(page.getByRole('heading', { name: /identity created/i })).toBeVisible({ timeout: 10000 });
+      await page.screenshot({ path: 'tests/e2e/screenshots/org-setup-05-mnemonic-display.png' });
+      console.log('Mnemonic phrase displayed');
     });
 
-    // Step 6: Verify config was saved to server
+    // Step 5: Verify mnemonic verification flow
+    await test.step('Complete mnemonic verification', async () => {
+      // First, capture the mnemonic words from the profile-confirmation screen
+      // The words are in .word-card elements, each containing "N." and the word
+      const wordCards = page.locator('.word-card');
+      const words: string[] = [];
+
+      const wordsCount = await wordCards.count();
+      console.log(`Found ${wordsCount} word cards`);
+
+      for (let i = 0; i < wordsCount; i++) {
+        const card = wordCards.nth(i);
+        // Get the word text (second span with font-mono class)
+        const wordSpan = card.locator('span.font-mono');
+        const wordText = await wordSpan.textContent();
+        if (wordText) {
+          words.push(wordText.trim());
+        }
+      }
+      console.log(`Captured ${words.length} mnemonic words: ${words.join(', ')}`);
+
+      // Check the confirmation checkbox and continue
+      const checkbox = page.getByRole('checkbox');
+      await checkbox.click();
+      const continueBtn = page.getByRole('button', { name: /continue/i });
+      await expect(continueBtn).toBeEnabled();
+      await continueBtn.click();
+
+      // Should see mnemonic verification screen
+      await expect(page.getByRole('heading', { name: /verify your recovery phrase/i })).toBeVisible({ timeout: 10000 });
+      await page.screenshot({ path: 'tests/e2e/screenshots/org-setup-06-mnemonic-verify.png' });
+      console.log('Mnemonic verification screen shown');
+
+      // Find all labels that show "Word #N" to determine which words to verify
+      const wordLabels = page.locator('label:has-text("Word #")');
+      const labelCount = await wordLabels.count();
+      console.log(`Found ${labelCount} word labels`);
+
+      for (let i = 0; i < labelCount; i++) {
+        const label = wordLabels.nth(i);
+        const labelText = await label.textContent();
+        console.log(`Label ${i}: "${labelText}"`);
+
+        // Extract word number from "Word #N"
+        const wordNumMatch = labelText?.match(/word\s*#(\d+)/i);
+        if (wordNumMatch && words.length > 0) {
+          const wordIndex = parseInt(wordNumMatch[1]) - 1; // Convert to 0-based
+          if (wordIndex >= 0 && wordIndex < words.length) {
+            // Find the input by placeholder
+            const placeholder = `Enter word #${wordIndex + 1}`;
+            const input = page.getByPlaceholder(placeholder);
+            console.log(`Filling word ${wordIndex + 1}: "${words[wordIndex]}"`);
+            await input.fill(words[wordIndex]);
+          }
+        }
+      }
+
+      // Click verify button
+      const verifyBtn = page.getByRole('button', { name: /verify/i });
+      await expect(verifyBtn).toBeEnabled({ timeout: 5000 });
+      await verifyBtn.click();
+      console.log('Clicked verify button');
+
+      await page.screenshot({ path: 'tests/e2e/screenshots/org-setup-07-verify-complete.png' });
+    });
+
+    // Step 6: Verify pending-approval screen is shown
+    await test.step('Verify pending approval screen', async () => {
+      // Should navigate to pending-approval screen
+      await expect(page.getByRole('heading', { name: /registration pending/i })).toBeVisible({ timeout: 30000 });
+      await page.screenshot({ path: 'tests/e2e/screenshots/org-setup-08-pending.png' });
+      console.log('Pending approval screen shown');
+
+      // Verify the admin's AID is displayed on the screen
+      // This confirms the identity store was properly populated
+      const aidDisplay = page.locator('text=/^E[A-Za-z0-9_-]{43}$/');
+      await expect(aidDisplay).toBeVisible({ timeout: 5000 });
+      console.log('Admin AID displayed on pending approval screen');
+
+      // Note: Full credential admission flow (waiting for grant, auto-admit, welcome overlay)
+      // requires stable KERI infrastructure. The key flow verification is complete:
+      // 1. Setup form → org creation
+      // 2. Mnemonic display and verification
+      // 3. Navigation to pending-approval
+      // 4. Admin AID properly stored in identity store
+    });
+
+    // Step 7: Verify config was saved to server
     await test.step('Verify config saved to server', async () => {
       const response = await request.get(`${CONFIG_SERVER_URL}/api/config`);
       expect(response.ok()).toBe(true);
@@ -177,7 +263,7 @@ test.describe('Matou Organization Setup Flow', () => {
       console.log(`Admin AID: ${config.admin.aid}`);
     });
 
-    // Step 7: Verify config is also cached in localStorage
+    // Step 8: Verify config is also cached in localStorage
     await test.step('Verify config cached in localStorage', async () => {
       const cachedConfig = await page.evaluate(() => {
         const stored = localStorage.getItem('matou_org_config');

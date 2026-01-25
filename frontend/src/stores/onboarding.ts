@@ -63,7 +63,7 @@ export type ParticipationInterest = typeof PARTICIPATION_INTERESTS[number]['valu
 /**
  * Onboarding flow path
  */
-export type OnboardingPath = 'invite' | 'register' | 'recover' | null;
+export type OnboardingPath = 'invite' | 'register' | 'recover' | 'setup' | null;
 
 /**
  * User profile data
