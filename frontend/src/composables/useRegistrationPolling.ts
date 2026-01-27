@@ -1,6 +1,6 @@
 /**
  * Composable for polling registration requests (admin side)
- * Polls for pending registration EXN messages and parses applicant data
+ * Polls for pending registration notifications and parses applicant data
  *
  * Supports two notification types:
  * 1. Pending (escrowed) - from KERIA patch, sender OOBI not yet resolved
@@ -61,7 +61,6 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
 
   /**
    * Poll for registration notifications
-   * Checks both pending (escrowed) and verified notification routes
    */
   async function pollForRegistrations(): Promise<void> {
     const client = keriClient.getSignifyClient();
@@ -74,105 +73,77 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
       const registrations: PendingRegistration[] = [];
 
       // === 1. Check for PENDING notifications (from KERIA patch) ===
-      // These are escrowed messages where sender OOBI has not been resolved yet
-      // Data is embedded directly in notification.a.a
-      try {
-        const pendingNotifications = await keriClient.listNotifications({
-          route: REGISTRATION_ROUTES.PENDING,
-          read: false,
-        });
-        console.log(`[RegistrationPolling] Pending (escrowed) notifications: ${pendingNotifications.length}`);
+      const pendingNotifications = await keriClient.listNotifications({
+        route: REGISTRATION_ROUTES.PENDING,
+        read: false,
+      });
 
-        for (const notification of pendingNotifications) {
-          try {
-            // Pending notifications from patch have data directly in a.a
-            const attrs = notification.a;
-            const embeddedData = attrs?.a || {};
+      for (const notification of pendingNotifications) {
+        try {
+          // Pending notifications from patch have data directly in a.a
+          const attrs = notification.a;
+          const embeddedData = attrs?.a || {};
 
-            console.log('[RegistrationPolling] Processing PENDING notification:', JSON.stringify(notification, null, 2));
-
-            // Parse embedded registration data
-            registrations.push({
-              notificationId: notification.i,
-              exnSaid: attrs?.d || notification.i,
-              applicantAid: attrs?.i || '',
-              applicantOOBI: (embeddedData.senderOOBI as string) || undefined,
-              profile: {
-                name: (embeddedData.name as string) || 'Unknown',
-                bio: (embeddedData.bio as string) || '',
-                interests: (embeddedData.interests as string[]) || [],
-                customInterests: (embeddedData.customInterests as string) || undefined,
-                submittedAt: (attrs?.dt as string) || new Date().toISOString(),
-              },
-              isPending: true,
-            });
-          } catch (parseErr) {
-            console.warn('[RegistrationPolling] Failed to parse pending notification:', notification.i, parseErr);
-          }
+          registrations.push({
+            notificationId: notification.i,
+            exnSaid: attrs?.d || notification.i,
+            applicantAid: attrs?.i || '',
+            applicantOOBI: (embeddedData.senderOOBI as string) || undefined,
+            profile: {
+              name: (embeddedData.name as string) || 'Unknown',
+              bio: (embeddedData.bio as string) || '',
+              interests: (embeddedData.interests as string[]) || [],
+              customInterests: (embeddedData.customInterests as string) || undefined,
+              submittedAt: (attrs?.dt as string) || new Date().toISOString(),
+            },
+            isPending: true,
+          });
+        } catch (parseErr) {
+          console.warn('[RegistrationPolling] Failed to parse pending notification:', notification.i, parseErr);
         }
-      } catch (pendingErr) {
-        console.log('[RegistrationPolling] Error fetching pending notifications:', pendingErr);
       }
 
-      // === 2. Check for VERIFIED notifications (standard flow) ===
-      // These are processed after OOBI resolution, need to fetch full EXN
-
-      // 2a. IPEX apply notifications
+      // === 2. Check for VERIFIED notifications ===
       const ipexNotifications = await keriClient.listNotifications({
         route: REGISTRATION_ROUTES.VERIFIED_IPEX,
         read: false,
       });
-      console.log(`[RegistrationPolling] IPEX apply notifications: ${ipexNotifications.length}`);
 
-      // 2b. Custom route notifications
       const customNotifications = await keriClient.listNotifications({
         route: REGISTRATION_ROUTES.VERIFIED_CUSTOM,
         read: false,
       });
-      console.log(`[RegistrationPolling] Custom route notifications: ${customNotifications.length}`);
 
-      // Process verified notifications
       const verifiedNotifications = [...ipexNotifications, ...customNotifications];
 
       for (const notification of verifiedNotifications) {
         try {
-          // Fetch the full EXN message for verified notifications
           const exchange = await keriClient.getExchange(notification.a.d);
           const exn = exchange.exn;
 
-          console.log('[RegistrationPolling] Processing VERIFIED EXN:', JSON.stringify(exn, null, 2));
-
-          // For IPEX apply, the data is structured differently:
-          // - exn.a contains attributes (name, interests)
-          // - exn.e?.msg contains the JSON message with bio, senderOOBI, etc.
           const attributes = exn.a || {};
           let messageData: Record<string, unknown> = {};
 
-          // Parse the message field if it exists (we encoded registration data there)
           if (typeof attributes.msg === 'string') {
             try {
               messageData = JSON.parse(attributes.msg);
             } catch {
-              console.warn('[RegistrationPolling] Could not parse message JSON');
+              // Ignore parse errors
             }
           }
 
-          // For IPEX apply, check if this looks like a registration
-          // (has name in attributes or registration type in message)
+          // Check if this looks like a registration
           const isRegistration =
             messageData.type === 'registration' ||
             attributes.name ||
             (exn.r && exn.r.includes('/ipex/apply'));
 
-          if (!isRegistration) {
-            console.log('[RegistrationPolling] Skipping non-registration IPEX apply:', notification.a.d);
-            continue;
-          }
+          if (!isRegistration) continue;
 
           registrations.push({
             notificationId: notification.i,
             exnSaid: notification.a.d,
-            applicantAid: exn.i,  // Sender AID
+            applicantAid: exn.i,
             applicantOOBI: (messageData.senderOOBI as string) || undefined,
             profile: {
               name: (attributes.name as string) || 'Unknown',
@@ -188,17 +159,7 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
         }
       }
 
-      // === 3. Log debug info for escrows ===
-      try {
-        const escrowReplies = await client.escrows().listReply('/exn/ipex/apply');
-        if (escrowReplies && Object.keys(escrowReplies).length > 0) {
-          console.log('[RegistrationPolling] Escrow replies (ipex/apply):', JSON.stringify(escrowReplies, null, 2));
-        }
-      } catch {
-        // Escrow API may not be available
-      }
-
-      // === 4. Deduplicate by exnSaid (prefer verified over pending) ===
+      // === 3. Deduplicate by exnSaid (prefer verified over pending) ===
       const seenSaids = new Set<string>();
       const deduped: PendingRegistration[] = [];
 
@@ -220,7 +181,9 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
         new Date(b.profile.submittedAt).getTime() - new Date(a.profile.submittedAt).getTime()
       );
 
-      console.log(`[RegistrationPolling] Total registrations: ${deduped.length} (${deduped.filter(r => r.isPending).length} pending, ${deduped.filter(r => !r.isPending).length} verified)`);
+      const pendingCount = deduped.filter(r => r.isPending).length;
+      const verifiedCount = deduped.filter(r => !r.isPending).length;
+      console.log(`[RegistrationPolling] Found ${deduped.length} registrations (${pendingCount} pending, ${verifiedCount} verified)`);
 
       pendingRegistrations.value = deduped;
       lastPollTime.value = new Date();
@@ -285,7 +248,6 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
 
   /**
    * Remove a registration from the list (after processing)
-   * @param notificationId - The notification ID to remove
    */
   function removeRegistration(notificationId: string): void {
     pendingRegistrations.value = pendingRegistrations.value.filter(
