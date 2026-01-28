@@ -167,7 +167,36 @@ export function useOrgSetup() {
       await saveOrgConfig(orgConfig);
       console.log('[OrgSetup] Config saved to server');
 
-      // Step 10: Store admin passcode in localStorage
+      // Step 10: Create community space in any-sync
+      progress.value = 'Creating community space...';
+      try {
+        const spaceResponse = await fetch('http://localhost:8080/api/v1/spaces/community', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orgAid: orgAid.prefix,
+            orgName: config.orgName,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (spaceResponse.ok) {
+          const spaceResult = await spaceResponse.json() as { spaceId: string; success: boolean };
+          console.log('[OrgSetup] Created community space:', spaceResult.spaceId);
+
+          // Update org config with community space ID
+          orgConfig.communitySpaceId = spaceResult.spaceId;
+          await saveOrgConfig(orgConfig);
+          console.log('[OrgSetup] Updated config with community space ID');
+        } else {
+          console.warn('[OrgSetup] Failed to create community space:', await spaceResponse.text());
+        }
+      } catch (err) {
+        // Non-fatal error - space can be created later
+        console.warn('[OrgSetup] Community space creation deferred:', err);
+      }
+
+      // Step 11: Store admin passcode in localStorage
       localStorage.setItem('matou_passcode', adminPasscode);
       localStorage.setItem('matou_admin_aid', adminAid.prefix);
       localStorage.setItem('matou_org_aid', orgAid.prefix);

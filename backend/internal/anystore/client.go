@@ -478,3 +478,20 @@ func (s *LocalStore) CountSpaces(ctx context.Context) (int, error) {
 
 	return int(count), nil
 }
+
+// GetUserSpace is a convenience method that returns a user's private space
+// This delegates to the SpaceStoreAdapter for proper type conversion
+func (s *LocalStore) GetUserSpace(ctx context.Context, userAID string) (*SpaceRecord, error) {
+	return s.GetUserSpaceRecord(ctx, userAID)
+}
+
+// SaveSpace is a convenience method that saves a space record
+// This is compatible with the SpaceRecord type
+func (s *LocalStore) SaveSpace(ctx context.Context, record *SpaceRecord) error {
+	return s.SaveSpaceRecord(ctx, record)
+}
+
+// ListAllSpaces is a convenience method that lists all spaces
+func (s *LocalStore) ListAllSpaces(ctx context.Context) ([]*SpaceRecord, error) {
+	return s.ListAllSpaceRecords(ctx)
+}

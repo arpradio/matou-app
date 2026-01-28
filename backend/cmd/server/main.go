@@ -31,20 +31,7 @@ func main() {
 	fmt.Printf("   Admin AID: %s\n", cfg.GetAdminAID())
 	fmt.Println()
 
-	// Initialize any-sync client
-	fmt.Println("Initializing any-sync client...")
-	anysyncClient, err := anysync.NewClient("../infrastructure/any-sync/etc/client.yml")
-	if err != nil {
-		log.Fatalf("Failed to create any-sync client: %v", err)
-	}
-
-	fmt.Printf("  any-sync client initialized\n")
-	fmt.Printf("   Network ID: %s\n", anysyncClient.GetNetworkID())
-	fmt.Printf("   Coordinator: %s\n", anysyncClient.GetCoordinatorURL())
-	fmt.Println()
-
-	// Initialize local storage
-	fmt.Println("Initializing local storage (anystore)...")
+	// Initialize data directory
 	dataDir := os.Getenv("MATOU_DATA_DIR")
 	if dataDir == "" {
 		dataDir = "./data"
@@ -52,6 +39,55 @@ func main() {
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
+
+	// Initialize any-sync client
+	fmt.Println("Initializing any-sync client...")
+
+	// Select config file based on environment
+	anysyncConfigPath := os.Getenv("MATOU_ANYSYNC_CONFIG")
+	if anysyncConfigPath == "" {
+		// Default to host config when running on host
+		anysyncConfigPath = "config/client-host.yml"
+	}
+
+	// Check if full SDK mode is enabled
+	// MATOU_ANYSYNC_MODE=sdk enables full network connectivity
+	// Default is "local" mode which stores data locally without network sync
+	anysyncMode := os.Getenv("MATOU_ANYSYNC_MODE")
+
+	var anysyncClient anysync.AnySyncClient
+	if anysyncMode == "sdk" {
+		fmt.Println("  Mode: Full SDK (network sync enabled)")
+		sdkClient, err := anysync.NewSDKClient(anysyncConfigPath, &anysync.ClientOptions{
+			DataDir:     dataDir,
+			PeerKeyPath: dataDir + "/peer.key",
+		})
+		if err != nil {
+			log.Fatalf("Failed to create any-sync SDK client: %v", err)
+		}
+		anysyncClient = sdkClient
+		defer sdkClient.Close()
+	} else {
+		fmt.Println("  Mode: Local (network sync disabled)")
+		localClient, err := anysync.NewClient(anysyncConfigPath, &anysync.ClientOptions{
+			DataDir:     dataDir,
+			PeerKeyPath: dataDir + "/peer.key",
+		})
+		if err != nil {
+			log.Fatalf("Failed to create any-sync client: %v", err)
+		}
+		anysyncClient = localClient
+		defer localClient.Close()
+	}
+
+	fmt.Printf("  any-sync client initialized\n")
+	fmt.Printf("   Network ID: %s\n", anysyncClient.GetNetworkID())
+	fmt.Printf("   Coordinator: %s\n", anysyncClient.GetCoordinatorURL())
+	fmt.Printf("   Peer ID: %s\n", anysyncClient.GetPeerID())
+	fmt.Println()
+
+	// Initialize local storage
+	fmt.Println("Initializing local storage (anystore)...")
 
 	store, err := anystore.NewLocalStore(anystore.DefaultConfig(dataDir))
 	if err != nil {
@@ -101,15 +137,16 @@ func main() {
 	syncHandler := api.NewSyncHandler(keriClient, store, spaceManager, spaceStore)
 	trustHandler := api.NewTrustHandler(store, cfg.GetOrgAID())
 	healthHandler := api.NewHealthHandler(store, spaceStore, cfg.GetOrgAID(), cfg.GetAdminAID())
+	spacesHandler := api.NewSpacesHandler(spaceManager, store)
 
 	// Create HTTP server
 	mux := http.NewServeMux()
 
 	// Health check endpoint (with sync/trust status)
-	mux.HandleFunc("/health", healthHandler.HandleHealth)
+	mux.HandleFunc("/health", api.CORSHandler(healthHandler.HandleHealth))
 
 	// Info endpoint
-	mux.HandleFunc("/info", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/info", api.CORSHandler(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, `{
@@ -135,12 +172,13 @@ func main() {
 			anysyncClient.GetNetworkID(),
 			anysyncClient.GetCoordinatorURL(),
 		)
-	})
+	}))
 
 	// Register API routes
 	credHandler.RegisterRoutes(mux)
 	syncHandler.RegisterRoutes(mux)
 	trustHandler.RegisterRoutes(mux)
+	spacesHandler.RegisterRoutes(mux)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -170,8 +208,16 @@ func main() {
 	fmt.Println("  GET  /api/v1/trust/scores          - Get top trust scores")
 	fmt.Println("  GET  /api/v1/trust/summary         - Get trust graph summary")
 	fmt.Println()
+	fmt.Println("  Spaces (any-sync):")
+	fmt.Println("  POST /api/v1/spaces/community         - Create community space")
+	fmt.Println("  GET  /api/v1/spaces/community         - Get community space info")
+	fmt.Println("  POST /api/v1/spaces/private           - Create private space")
+	fmt.Println("  POST /api/v1/spaces/community/invite  - Invite user to community")
+	fmt.Println()
 
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	// Wrap with CORS middleware
+	handler := api.CORSMiddleware(mux)
+	if err := http.ListenAndServe(addr, handler); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

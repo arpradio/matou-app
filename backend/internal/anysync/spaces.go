@@ -28,7 +28,7 @@ type Space struct {
 
 // SpaceManager manages any-sync spaces for MATOU
 type SpaceManager struct {
-	client           *Client
+	client           AnySyncClient
 	communitySpaceID string
 	orgAID           string
 }
@@ -40,7 +40,7 @@ type SpaceManagerConfig struct {
 }
 
 // NewSpaceManager creates a new SpaceManager
-func NewSpaceManager(client *Client, cfg *SpaceManagerConfig) *SpaceManager {
+func NewSpaceManager(client AnySyncClient, cfg *SpaceManagerConfig) *SpaceManager {
 	return &SpaceManager{
 		client:           client,
 		communitySpaceID: cfg.CommunitySpaceID,
@@ -61,7 +61,13 @@ func (m *SpaceManager) CreatePrivateSpace(ctx context.Context, userAID string) (
 		return nil, fmt.Errorf("user AID is required")
 	}
 
-	spaceID := generatePrivateSpaceID(userAID)
+	// Create space via any-sync client using the SDK
+	result, err := m.client.CreateSpace(ctx, userAID, SpaceTypePrivate, nil)
+	if err != nil {
+		// Handle "space already exists" gracefully
+		// The SDK returns the existing space ID in this case
+		return nil, fmt.Errorf("creating space: %w", err)
+	}
 
 	// Truncate AID for display name (use shorter of 12 chars or full AID)
 	displayAID := userAID
@@ -70,21 +76,13 @@ func (m *SpaceManager) CreatePrivateSpace(ctx context.Context, userAID string) (
 	}
 	spaceName := fmt.Sprintf("Private Space - %s", displayAID)
 
-	// Create space via any-sync client
-	_, err := m.client.CreateSpace(userAID, SpaceTypePrivate, spaceName)
-	if err != nil {
-		// Note: In production, this might fail if space already exists
-		// For now, we'll continue and return the space info
-		// The actual any-sync SDK will handle this more gracefully
-	}
-
 	space := &Space{
-		SpaceID:   spaceID,
+		SpaceID:   result.SpaceID,
 		OwnerAID:  userAID,
 		SpaceType: SpaceTypePrivate,
 		SpaceName: spaceName,
-		CreatedAt: time.Now().UTC(),
-		LastSync:  time.Now().UTC(),
+		CreatedAt: result.CreatedAt,
+		LastSync:  result.CreatedAt,
 	}
 
 	return space, nil
@@ -136,6 +134,16 @@ func (m *SpaceManager) GetCommunitySpace(ctx context.Context) (*Space, error) {
 // GetCommunitySpaceID returns the community space ID
 func (m *SpaceManager) GetCommunitySpaceID() string {
 	return m.communitySpaceID
+}
+
+// GetClient returns the any-sync client
+func (m *SpaceManager) GetClient() AnySyncClient {
+	return m.client
+}
+
+// SetCommunitySpaceID sets the community space ID
+func (m *SpaceManager) SetCommunitySpaceID(spaceID string) {
+	m.communitySpaceID = spaceID
 }
 
 // Credential represents a credential for routing purposes

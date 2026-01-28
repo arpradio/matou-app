@@ -177,7 +177,35 @@ export function useAdminActions() {
 
       console.log('[AdminActions] Credential issued:', credResult.said);
 
-      // 5. Mark ALL notifications for this applicant as read
+      // 5. Invite user to community space (non-blocking)
+      try {
+        const inviteResponse = await fetch('http://localhost:8080/api/v1/spaces/community/invite', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipientAid: registration.applicantAid,
+            credentialSaid: credResult.said,
+            schema: 'EMatouMembershipSchemaV1',
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (inviteResponse.ok) {
+          const inviteResult = await inviteResponse.json() as {
+            success: boolean;
+            privateSpaceId?: string;
+            communitySpaceId?: string;
+          };
+          console.log('[AdminActions] User invited to community space:', inviteResult);
+        } else {
+          console.warn('[AdminActions] Space invitation failed:', await inviteResponse.text());
+        }
+      } catch (inviteErr) {
+        // Non-fatal - invitation can be retried via credential sync
+        console.warn('[AdminActions] Space invitation deferred:', inviteErr);
+      }
+
+      // 6. Mark ALL notifications for this applicant as read
       // (handles both IPEX and custom EXN notifications)
       await markAllApplicantNotificationsRead(registration.applicantAid);
 

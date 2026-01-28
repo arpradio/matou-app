@@ -1,0 +1,39 @@
+# Any-sync client configuration for host access
+# Use this config when running the backend on the host (not in Docker)
+# The addresses use localhost with mapped ports instead of Docker-internal hostnames
+#
+# Set MATOU_ANYSYNC_CONFIG=config/client-host.yml when running backend on host
+
+id: 696c1ed9b133560019fb95d5
+networkId: "N4N6KzfYtNRNnC2LNDLjMtFik7846EPqLgi1PANKwpaAMGKF"
+nodes:
+  - peerId: 12D3KooWS5dPKAbWjWmPLnBKM3DGos2yZSRxBPFuWGvVwA5yfUPk
+    addresses:
+      - 127.0.0.1:1001
+    types:
+      - tree
+  - peerId: 12D3KooWDXsMgE1c9ymGffVa6au9tNYJ24ssACv6iWHsrrLHHUrf
+    addresses:
+      - 127.0.0.1:1002
+    types:
+      - tree
+  - peerId: 12D3KooWFKotD3ePjuHRcvkCRUf1Jt9QGA9MW6xKzF6SXZUBNzcm
+    addresses:
+      - 127.0.0.1:1003
+    types:
+      - tree
+  - peerId: 12D3KooWDs5s49guH4n2XYJuK9tny959as7FYZKoS8eYNZZNUBLs
+    addresses:
+      - 127.0.0.1:1004
+    types:
+      - coordinator
+  - peerId: 12D3KooWR4Ntr9ZqQQ61v1xK6jbLEaGi4toNQg2Rb4tJ3hvKLTgG
+    addresses:
+      - 127.0.0.1:1005
+    types:
+      - file
+  - peerId: 12D3KooWHTKXmopVvDY4DZezCJsHhKtQGTk2yzHy9djheRrXyVTL
+    addresses:
+      - 127.0.0.1:1006
+    types:
+      - consensus

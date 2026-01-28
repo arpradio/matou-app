@@ -124,6 +124,28 @@ export function useRegistration() {
       registrationSent.value = true;
       console.log('[Registration] Registration submitted successfully');
 
+      // Step 5: Create private space (non-blocking)
+      try {
+        const spaceResponse = await fetch('http://localhost:8080/api/v1/spaces/private', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userAid: currentAID.prefix,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (spaceResponse.ok) {
+          const spaceResult = await spaceResponse.json() as { spaceId: string; created: boolean };
+          console.log('[Registration] Private space created:', spaceResult.spaceId, spaceResult.created ? '(new)' : '(existing)');
+        } else {
+          console.warn('[Registration] Private space creation failed:', await spaceResponse.text());
+        }
+      } catch (err) {
+        // Non-fatal - space can be created later when credentials are synced
+        console.warn('[Registration] Private space creation deferred:', err);
+      }
+
       return true;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : 'Registration failed';

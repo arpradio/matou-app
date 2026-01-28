@@ -163,6 +163,8 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
           credential.value = credentials[0];
           credentialReceived.value = true;
           grantReceived.value = true; // Mark grant as received too
+          // Sync to backend for space routing (non-blocking)
+          syncCredentialToBackend();
           stopPolling();
           return;
         }
@@ -326,6 +328,8 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
           console.log('[CredentialPolling] Credential received:', credentials[0]);
           credential.value = credentials[0];
           credentialReceived.value = true;
+          // Sync to backend for space routing (non-blocking)
+          syncCredentialToBackend();
           return true;
         }
       } catch (err) {
@@ -426,6 +430,40 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     error.value = null;
     consecutiveErrors.value = 0;
     startPolling();
+  }
+
+  /**
+   * Sync credential to backend for space routing
+   * This triggers RouteCredential() which syncs to both private and community spaces
+   */
+  async function syncCredentialToBackend(): Promise<void> {
+    const currentAID = identityStore.currentAID;
+    if (!currentAID || !credential.value) {
+      console.log('[CredentialPolling] No AID or credential to sync');
+      return;
+    }
+
+    try {
+      const syncResponse = await fetch('http://localhost:8080/api/v1/sync/credentials', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userAid: currentAID.prefix,
+          credentialSaid: credential.value.sad?.d || credential.value.d,
+        }),
+        signal: AbortSignal.timeout(15000),
+      });
+
+      if (syncResponse.ok) {
+        const syncResult = await syncResponse.json() as { synced: number; spaces: string[] };
+        console.log('[CredentialPolling] Credential synced to backend:', syncResult);
+      } else {
+        console.warn('[CredentialPolling] Backend sync failed:', await syncResponse.text());
+      }
+    } catch (err) {
+      // Non-fatal - credential is in KERIA wallet, sync can be retried later
+      console.warn('[CredentialPolling] Backend sync deferred:', err);
+    }
   }
 
   // Cleanup on unmount

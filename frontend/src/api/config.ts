@@ -28,6 +28,8 @@ export interface OrgConfig {
     id: string;
     name: string;
   };
+  // any-sync community space ID (created during org setup)
+  communitySpaceId?: string;
   generated: string;
 }
 
