@@ -5,6 +5,7 @@
 import { ref, onUnmounted } from 'vue';
 import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
+import { fetchOrgConfig } from 'src/api/config';
 
 export interface CredentialPollingOptions {
   pollingInterval?: number; // Default: 5000ms
@@ -65,6 +66,81 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
   }
 
   /**
+   * Resolve org and admin OOBIs so we can receive messages from them
+   * This is essential for receiving decline/message notifications
+   */
+  async function resolveOrgOobis(): Promise<void> {
+    console.log('[CredentialPolling] Resolving org OOBIs...');
+    try {
+      const configResult = await fetchOrgConfig();
+      console.log('[CredentialPolling] Config result status:', configResult.status);
+      const config = configResult.status === 'configured'
+        ? configResult.config
+        : configResult.status === 'server_unreachable'
+          ? configResult.cached
+          : null;
+
+      if (!config) {
+        console.log('[CredentialPolling] No org config available for OOBI resolution');
+        return;
+      }
+
+      // Resolve schema OOBI (required for credential verification)
+      // The schema SAID is defined in the org setup
+      const schemaOOBI = config.schema?.oobi;
+      if (schemaOOBI) {
+        try {
+          await keriClient.resolveOOBI(schemaOOBI, undefined, 10000);
+          console.log('[CredentialPolling] Resolved schema OOBI:', schemaOOBI.slice(0, 50) + '...');
+        } catch (err) {
+          console.log('[CredentialPolling] Could not resolve schema OOBI:', err);
+        }
+      } else {
+        // Fallback: try default schema server URL with known schema SAID
+        // Use Docker network hostname (schema-server) for KERIA to access
+        const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
+        const fallbackSchemaOOBI = `http://schema-server:7723/oobi/${MEMBERSHIP_SCHEMA_SAID}`;
+        try {
+          await keriClient.resolveOOBI(fallbackSchemaOOBI, undefined, 10000);
+          console.log('[CredentialPolling] Resolved schema OOBI (fallback):', fallbackSchemaOOBI);
+        } catch (err) {
+          console.log('[CredentialPolling] Could not resolve schema OOBI:', err);
+        }
+      }
+
+      // Resolve org OOBI (for receiving credentials)
+      // The org OOBI is stored at config.organization.oobi
+      const orgOOBI = config.organization?.oobi;
+      if (orgOOBI) {
+        try {
+          await keriClient.resolveOOBI(orgOOBI, undefined, 10000);
+          console.log('[CredentialPolling] Resolved org OOBI:', orgOOBI.slice(0, 50) + '...');
+        } catch (err) {
+          console.log('[CredentialPolling] Could not resolve org OOBI:', err);
+        }
+      } else {
+        console.log('[CredentialPolling] No org OOBI found in config');
+      }
+
+      // Resolve admin OOBIs (for receiving messages/rejections)
+      if (config.admins?.length) {
+        for (const admin of config.admins) {
+          if (admin.oobi) {
+            try {
+              await keriClient.resolveOOBI(admin.oobi, undefined, 5000);
+              console.log(`[CredentialPolling] Resolved admin OOBI: ${admin.aid?.slice(0, 12)}...`);
+            } catch (err) {
+              console.log(`[CredentialPolling] Could not resolve admin OOBI: ${err}`);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[CredentialPolling] Failed to resolve org OOBIs:', err);
+    }
+  }
+
+  /**
    * Poll for IPEX grant notifications or existing credentials
    */
   async function pollForGrants(): Promise<void> {
@@ -121,7 +197,7 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
 
       // Check for rejection notifications
       const rejections = notifications.notes?.filter(
-        (n: IPEXNotification) => n.a?.r === '/matou/registration/decline' && !n.r
+        (n: IPEXNotification) => n.a?.r === '/exn/matou/registration/decline' && !n.r
       ) ?? [];
 
       if (rejections.length > 0 && !rejectionReceived.value) {
@@ -144,7 +220,7 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
 
       // Check for message notifications
       const messages = notifications.notes?.filter(
-        (n: IPEXNotification) => n.a?.r === '/matou/registration/message' && !n.r
+        (n: IPEXNotification) => n.a?.r === '/exn/matou/registration/message' && !n.r
       ) ?? [];
 
       for (const msgNotification of messages) {
@@ -231,8 +307,12 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
    * Poll for credential in wallet after admitting
    */
   async function pollForCredential(): Promise<void> {
+    console.log('[CredentialPolling] Starting pollForCredential...');
     const client = keriClient.getSignifyClient();
-    if (!client) return;
+    if (!client) {
+      console.warn('[CredentialPolling] No client available for credential polling');
+      return;
+    }
 
     // Poll with shorter interval for credential arrival
     const credentialPollInterval = 2000;
@@ -261,9 +341,11 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     }
 
     // Then poll with interval
+    console.log('[CredentialPolling] Starting credential poll loop...');
     return new Promise((resolve) => {
       const credentialTimer = setInterval(async () => {
         attempts++;
+        console.log(`[CredentialPolling] Polling attempt ${attempts}/${maxAttempts}...`);
 
         if (await checkCredential()) {
           clearInterval(credentialTimer);
@@ -285,7 +367,7 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
   /**
    * Start polling for grants
    */
-  function startPolling(): void {
+  async function startPolling(): Promise<void> {
     if (isPolling.value) return;
 
     const client = keriClient.getSignifyClient();
@@ -312,6 +394,9 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     isPolling.value = true;
     error.value = null;
     consecutiveErrors.value = 0;
+
+    // Resolve org/admin OOBIs so we can receive messages from them
+    await resolveOrgOobis();
 
     // Poll immediately
     pollForGrants();

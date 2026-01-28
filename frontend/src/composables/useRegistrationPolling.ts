@@ -30,13 +30,27 @@ export interface PendingRegistration {
   isPending: boolean;
 }
 
+export interface ApplicantMessage {
+  id: string;
+  applicantAid: string;
+  content: string;
+  sentAt: string;
+}
+
 // Routes to poll for registration notifications
+// IPEX apply is the primary registration mechanism (has native KERIA notification support)
+// Custom EXN routes are used for admin responses (decline, message)
 const REGISTRATION_ROUTES = {
-  // Pending notifications from KERIA patch (escrowed, unverified)
+  // IPEX apply - primary registration route (native KERIA support)
+  IPEX_APPLY: '/exn/ipex/apply',
+  // Pending IPEX apply notifications from KERIA patch (escrowed, unverified)
+  IPEX_APPLY_PENDING: '/exn/ipex/apply/pending',
+  // Pending notifications from KERIA patch for custom EXN (escrowed, unverified)
   PENDING: '/exn/matou/registration/apply/pending',
-  // Verified notifications (after OOBI resolution)
-  VERIFIED_CUSTOM: '/exn/matou/registration/apply',
-  VERIFIED_IPEX: '/exn/ipex/apply',
+  // Verified custom EXN notifications (fallback)
+  VERIFIED: '/exn/matou/registration/apply',
+  // Message replies from applicants
+  MESSAGE_REPLY: '/exn/matou/registration/message_reply',
 };
 
 export interface RegistrationPollingOptions {
@@ -51,10 +65,15 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
 
   // State
   const pendingRegistrations = ref<PendingRegistration[]>([]);
+  const applicantMessages = ref<ApplicantMessage[]>([]);
   const isPolling = ref(false);
   const error = ref<string | null>(null);
   const lastPollTime = ref<Date | null>(null);
   const consecutiveErrors = ref(0);
+
+  // Track processed applicants to prevent re-adding after removal
+  // This is needed because multiple notifications can exist for the same user
+  const processedApplicantAids = new Set<string>();
 
   // Internal state
   let pollingTimer: ReturnType<typeof setInterval> | null = null;
@@ -72,11 +91,31 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
     try {
       const registrations: PendingRegistration[] = [];
 
+      // Debug: List ALL unread notifications to see what routes exist
+      const allNotes = await keriClient.listNotifications({ read: false });
+      const routeCounts = allNotes.reduce((acc: Record<string, number>, n: { a?: { r?: string } }) => {
+        const route = n.a?.r || 'unknown';
+        acc[route] = (acc[route] || 0) + 1;
+        return acc;
+      }, {});
+      console.log(`[RegistrationPolling] All unread notifications by route:`, JSON.stringify(routeCounts));
+
       // === 1. Check for PENDING notifications (from KERIA patch) ===
       const pendingNotifications = await keriClient.listNotifications({
         route: REGISTRATION_ROUTES.PENDING,
         read: false,
       });
+
+      console.log(`[RegistrationPolling] Pending notifications: ${pendingNotifications.length}`);
+
+      // Log first few notifications for debugging - dump full structure
+      if (pendingNotifications.length > 0) {
+        console.log('[RegistrationPolling] Sample pending notifications (full structure):');
+        for (let i = 0; i < Math.min(3, pendingNotifications.length); i++) {
+          const n = pendingNotifications[i];
+          console.log(`  [${i}] FULL NOTIFICATION:`, JSON.stringify(n, null, 2));
+        }
+      }
 
       for (const notification of pendingNotifications) {
         try {
@@ -84,13 +123,19 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
           const attrs = notification.a;
           const embeddedData = attrs?.a || {};
 
+          const applicantAid = attrs?.i || '';
+          const name = (embeddedData.name as string) || 'Unknown';
+
+          // Log each unique applicant we find
+          console.log(`[RegistrationPolling] Parsed: aid=${applicantAid.slice(0, 12)}..., name="${name}"`);
+
           registrations.push({
             notificationId: notification.i,
             exnSaid: attrs?.d || notification.i,
-            applicantAid: attrs?.i || '',
+            applicantAid,
             applicantOOBI: (embeddedData.senderOOBI as string) || undefined,
             profile: {
-              name: (embeddedData.name as string) || 'Unknown',
+              name,
               bio: (embeddedData.bio as string) || '',
               interests: (embeddedData.interests as string[]) || [],
               customInterests: (embeddedData.customInterests as string) || undefined,
@@ -103,18 +148,94 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
         }
       }
 
-      // === 2. Check for VERIFIED notifications ===
-      const ipexNotifications = await keriClient.listNotifications({
-        route: REGISTRATION_ROUTES.VERIFIED_IPEX,
+      // === 2. Check for IPEX APPLY PENDING notifications (from KERIA patch) ===
+      const ipexApplyPendingNotifications = await keriClient.listNotifications({
+        route: REGISTRATION_ROUTES.IPEX_APPLY_PENDING,
         read: false,
       });
 
-      const customNotifications = await keriClient.listNotifications({
-        route: REGISTRATION_ROUTES.VERIFIED_CUSTOM,
+      console.log(`[RegistrationPolling] IPEX apply pending notifications: ${ipexApplyPendingNotifications.length}`);
+
+      for (const notification of ipexApplyPendingNotifications) {
+        try {
+          // Pending notifications from patch have data directly in a.a
+          const attrs = notification.a;
+          const embeddedData = attrs?.a || {};
+
+          const applicantAid = attrs?.i || '';
+          const name = (embeddedData.name as string) || 'Unknown';
+
+          console.log(`[RegistrationPolling] IPEX apply pending: aid=${applicantAid.slice(0, 12)}..., name="${name}"`);
+
+          registrations.push({
+            notificationId: notification.i,
+            exnSaid: attrs?.d || notification.i,
+            applicantAid,
+            applicantOOBI: (embeddedData.senderOOBI as string) || undefined,
+            profile: {
+              name,
+              bio: (embeddedData.bio as string) || '',
+              interests: (embeddedData.interests as string[]) || [],
+              customInterests: (embeddedData.customInterests as string) || undefined,
+              submittedAt: (attrs?.dt as string) || new Date().toISOString(),
+            },
+            isPending: true,
+          });
+        } catch (parseErr) {
+          console.warn('[RegistrationPolling] Failed to parse IPEX apply pending notification:', notification.i, parseErr);
+        }
+      }
+
+      // === 3. Check for IPEX APPLY notifications (primary registration route) ===
+      const ipexApplyNotifications = await keriClient.listNotifications({
+        route: REGISTRATION_ROUTES.IPEX_APPLY,
         read: false,
       });
 
-      const verifiedNotifications = [...ipexNotifications, ...customNotifications];
+      console.log(`[RegistrationPolling] IPEX apply notifications: ${ipexApplyNotifications.length}`);
+
+      for (const notification of ipexApplyNotifications) {
+        try {
+          const exchange = await keriClient.getExchange(notification.a.d);
+          const exn = exchange.exn;
+
+          // IPEX apply has registration data in exn.a (attributes)
+          const attributes = exn.a || {};
+
+          // Skip if no name - not a valid registration
+          if (!attributes.name) {
+            console.log(`[RegistrationPolling] Skipping IPEX apply without name:`, notification.a.d);
+            continue;
+          }
+
+          console.log(`[RegistrationPolling] IPEX apply from ${exn.i?.slice(0, 12)}..., name="${attributes.name}"`);
+
+          registrations.push({
+            notificationId: notification.i,
+            exnSaid: notification.a.d,
+            applicantAid: exn.i,
+            applicantOOBI: (attributes.senderOOBI as string) || undefined,
+            profile: {
+              name: (attributes.name as string) || 'Unknown',
+              bio: (attributes.bio as string) || '',
+              interests: (attributes.interests as string[]) || [],
+              customInterests: (attributes.customInterests as string) || undefined,
+              submittedAt: (attributes.submittedAt as string) || new Date().toISOString(),
+            },
+            isPending: false,
+          });
+        } catch (exnErr) {
+          console.warn('[RegistrationPolling] Failed to fetch IPEX apply:', notification.a.d, exnErr);
+        }
+      }
+
+      // === 4. Check for VERIFIED custom EXN notifications (fallback) ===
+      const verifiedNotifications = await keriClient.listNotifications({
+        route: REGISTRATION_ROUTES.VERIFIED,
+        read: false,
+      });
+
+      console.log(`[RegistrationPolling] Verified custom EXN notifications: ${verifiedNotifications.length}`);
 
       for (const notification of verifiedNotifications) {
         try {
@@ -122,21 +243,11 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
           const exn = exchange.exn;
 
           const attributes = exn.a || {};
-          let messageData: Record<string, unknown> = {};
-
-          if (typeof attributes.msg === 'string') {
-            try {
-              messageData = JSON.parse(attributes.msg);
-            } catch {
-              // Ignore parse errors
-            }
-          }
 
           // Check if this looks like a registration
           const isRegistration =
-            messageData.type === 'registration' ||
-            attributes.name ||
-            (exn.r && exn.r.includes('/ipex/apply'));
+            attributes.type === 'registration' ||
+            attributes.name;
 
           if (!isRegistration) continue;
 
@@ -144,34 +255,38 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
             notificationId: notification.i,
             exnSaid: notification.a.d,
             applicantAid: exn.i,
-            applicantOOBI: (messageData.senderOOBI as string) || undefined,
+            applicantOOBI: (attributes.senderOOBI as string) || undefined,
             profile: {
               name: (attributes.name as string) || 'Unknown',
-              bio: (messageData.bio as string) || '',
+              bio: (attributes.bio as string) || '',
               interests: (attributes.interests as string[]) || [],
-              customInterests: (messageData.customInterests as string) || undefined,
-              submittedAt: (messageData.submittedAt as string) || new Date().toISOString(),
+              customInterests: (attributes.customInterests as string) || undefined,
+              submittedAt: (attributes.submittedAt as string) || new Date().toISOString(),
             },
             isPending: false,
           });
         } catch (exnErr) {
-          console.warn('[RegistrationPolling] Failed to fetch EXN:', notification.a.d, exnErr);
+          console.warn('[RegistrationPolling] Failed to fetch custom EXN:', notification.a.d, exnErr);
         }
       }
 
-      // === 3. Deduplicate by exnSaid (prefer verified over pending) ===
-      const seenSaids = new Set<string>();
+      // === 5. Deduplicate by applicantAid (prefer verified over pending, newest first) ===
+      // A user might send multiple registration messages (retries), show only the most recent
+      const seenApplicants = new Set<string>();
       const deduped: PendingRegistration[] = [];
 
-      // Sort so verified (isPending=false) comes first
+      // Sort: verified first, then by submission time (newest first)
       registrations.sort((a, b) => {
         if (a.isPending !== b.isPending) return a.isPending ? 1 : -1;
         return new Date(b.profile.submittedAt).getTime() - new Date(a.profile.submittedAt).getTime();
       });
 
       for (const reg of registrations) {
-        if (!seenSaids.has(reg.exnSaid)) {
-          seenSaids.add(reg.exnSaid);
+        // Skip if no applicant AID (invalid registration)
+        if (!reg.applicantAid) continue;
+
+        if (!seenApplicants.has(reg.applicantAid)) {
+          seenApplicants.add(reg.applicantAid);
           deduped.push(reg);
         }
       }
@@ -181,11 +296,52 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
         new Date(b.profile.submittedAt).getTime() - new Date(a.profile.submittedAt).getTime()
       );
 
-      const pendingCount = deduped.filter(r => r.isPending).length;
-      const verifiedCount = deduped.filter(r => !r.isPending).length;
-      console.log(`[RegistrationPolling] Found ${deduped.length} registrations (${pendingCount} pending, ${verifiedCount} verified)`);
+      // Filter out already-processed registrations (approved/declined)
+      const filtered = deduped.filter(r => !processedApplicantAids.has(r.applicantAid));
 
-      pendingRegistrations.value = deduped;
+      const pendingCount = filtered.filter(r => r.isPending).length;
+      const verifiedCount = filtered.filter(r => !r.isPending).length;
+      console.log(`[RegistrationPolling] After dedup: ${deduped.length} unique applicants, after filter: ${filtered.length}`);
+      console.log(`[RegistrationPolling] Found ${filtered.length} registrations (${pendingCount} pending, ${verifiedCount} verified)`);
+
+      // Log the final registrations
+      for (const reg of filtered) {
+        console.log(`[RegistrationPolling] Registration: aid=${reg.applicantAid.slice(0, 12)}..., name="${reg.profile.name}", pending=${reg.isPending}`);
+      }
+
+      pendingRegistrations.value = filtered;
+
+      // === 6. Check for MESSAGE REPLY notifications from applicants ===
+      const messageReplyNotifications = await keriClient.listNotifications({
+        route: REGISTRATION_ROUTES.MESSAGE_REPLY,
+        read: false,
+      });
+
+      for (const notification of messageReplyNotifications) {
+        try {
+          const exchange = await keriClient.getExchange(notification.a.d);
+          const exn = exchange.exn;
+          const payload = exn.a || {};
+
+          // Check if we already have this message
+          const existingIds = applicantMessages.value.map(m => m.id);
+          if (!existingIds.includes(notification.a.d)) {
+            applicantMessages.value.push({
+              id: notification.a.d,
+              applicantAid: exn.i,
+              content: (payload.content as string) || '',
+              sentAt: (payload.sentAt as string) || new Date().toISOString(),
+            });
+            console.log('[RegistrationPolling] New applicant message received from:', exn.i);
+          }
+
+          // Mark as read
+          await keriClient.markNotificationRead(notification.i);
+        } catch (msgErr) {
+          console.warn('[RegistrationPolling] Failed to fetch message reply:', notification.a.d, msgErr);
+        }
+      }
+
       lastPollTime.value = new Date();
       consecutiveErrors.value = 0;
       error.value = null;
@@ -248,8 +404,14 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
 
   /**
    * Remove a registration from the list (after processing)
+   * Also tracks the applicantAid to prevent re-adding on next poll
+   * (multiple notifications can exist for the same user)
    */
   function removeRegistration(notificationId: string): void {
+    const registration = pendingRegistrations.value.find(r => r.notificationId === notificationId);
+    if (registration) {
+      processedApplicantAids.add(registration.applicantAid);
+    }
     pendingRegistrations.value = pendingRegistrations.value.filter(
       r => r.notificationId !== notificationId
     );
@@ -272,6 +434,7 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
   return {
     // State
     pendingRegistrations,
+    applicantMessages,
     isPolling,
     error,
     lastPollTime,
