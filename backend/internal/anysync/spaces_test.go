@@ -68,6 +68,7 @@ func (m *mockAnySyncClient) SyncDocument(ctx context.Context, spaceID string, do
 func (m *mockAnySyncClient) GetNetworkID() string      { return m.networkID }
 func (m *mockAnySyncClient) GetCoordinatorURL() string { return m.coordinatorURL }
 func (m *mockAnySyncClient) GetPeerID() string         { return m.peerID }
+func (m *mockAnySyncClient) Ping() error               { return nil }
 func (m *mockAnySyncClient) Close() error              { return nil }
 
 // mockSpaceStore implements SpaceStore for testing

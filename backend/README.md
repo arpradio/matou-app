@@ -174,8 +174,12 @@ err = store.Preferences().Set(ctx, "user-id", prefs)
 
 ## Testing
 
+### Unit Tests
+
 ```bash
-# Run all tests
+cd backend
+
+# Run all unit tests
 go test ./... -v
 
 # Test specific packages
@@ -186,6 +190,47 @@ go test ./internal/anysync/... -v
 # With coverage
 go test ./... -cover
 ```
+
+### Integration Tests (any-sync network)
+
+Integration tests run the full SDK client against a real any-sync test network
+(ports 2001-2006). They require Docker.
+
+```bash
+cd backend
+
+# Start the test network (if not already running)
+cd ../infrastructure/any-sync-test && make start-and-wait && cd -
+
+# Run integration tests
+KEEP_TEST_NETWORK=1 go test -tags=integration -v -timeout 120s ./internal/anysync/...
+```
+
+`KEEP_TEST_NETWORK=1` keeps the network running between test runs so you don't
+wait for Docker startup each time. Without it, the test harness starts and stops
+the network automatically.
+
+#### Managing the test network manually
+
+```bash
+cd infrastructure/any-sync-test
+
+make start-and-wait   # Start and wait for readiness
+make -s is-running    # Check if running
+make down             # Stop
+make clean            # Stop and remove all data
+```
+
+#### Test network ports
+
+| Service      | Port(s)   |
+|--------------|-----------|
+| Sync nodes   | 2001-2003 |
+| Coordinator  | 2004      |
+| File node    | 2005      |
+| Consensus    | 2006      |
+| MongoDB      | 28017     |
+| Redis        | 7379      |
 
 ## API Endpoints
 

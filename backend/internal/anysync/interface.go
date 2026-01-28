@@ -35,6 +35,9 @@ type AnySyncClient interface {
 	// GetPeerID returns the client's peer ID
 	GetPeerID() string
 
+	// Ping tests connectivity to the any-sync network
+	Ping() error
+
 	// Close shuts down the client
 	Close() error
 }

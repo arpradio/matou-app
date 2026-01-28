@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -348,6 +349,30 @@ func (c *SDKClient) SyncDocument(ctx context.Context, spaceID string, docID stri
 
 	// TODO: Implement document sync using object tree
 	fmt.Printf("[any-sync SDK] SyncDocument: space=%s doc=%s size=%d\n", spaceID, docID, len(data))
+	return nil
+}
+
+// Ping tests connectivity to the any-sync coordinator
+func (c *SDKClient) Ping() error {
+	if !c.initialized {
+		return fmt.Errorf("client not initialized")
+	}
+	// Use coordinator StatusCheck with a dummy space ID to verify connectivity.
+	// A "space not found" error still means the coordinator is reachable.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := c.coordinator.StatusCheck(ctx, "ping-test")
+	if err != nil {
+		// Any response from the coordinator (including "space not exists") means it's reachable
+		errStr := err.Error()
+		if strings.Contains(errStr, "not found") ||
+			strings.Contains(errStr, "not exists") ||
+			strings.Contains(errStr, "SpaceNotExists") ||
+			strings.Contains(errStr, "unknown") {
+			return nil
+		}
+		return fmt.Errorf("coordinator unreachable: %w", err)
+	}
 	return nil
 }
 

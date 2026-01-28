@@ -244,6 +244,14 @@ func (m *MockAnySyncClient) GetPeerID() string {
 	return m.PeerID
 }
 
+// Ping implements AnySyncClient.Ping
+func (m *MockAnySyncClient) Ping() error {
+	if !m.Initialized {
+		return fmt.Errorf("client not initialized")
+	}
+	return nil
+}
+
 // Close implements AnySyncClient.Close
 func (m *MockAnySyncClient) Close() error {
 	if m.CloseError != nil {
