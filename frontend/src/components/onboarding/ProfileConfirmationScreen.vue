@@ -70,10 +70,10 @@
             <div>
               <h4 class="text-sm font-semibold text-amber-600 mb-1">Save Your Recovery Phrase</h4>
               <ul class="text-sm text-muted-foreground space-y-1">
-                <li>• This is the <strong>only way</strong> to recover your identity</li>
-                <li>• Write it down on paper and store it safely</li>
-                <li>• <strong>Never</strong> share it with anyone</li>
-                <li>• We cannot recover this for you</li>
+                <li>This is the <strong>only way</strong> to recover your identity</li>
+                <li>Write it down on paper and store it safely</li>
+                <li><strong>Never</strong> share it with anyone</li>
+                <li>We cannot recover this for you</li>
               </ul>
             </div>
           </div>

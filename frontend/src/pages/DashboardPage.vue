@@ -68,7 +68,37 @@
         <div class="welcome-content">
           <div class="welcome-text">
             <h1 class="welcome-title">Welcome back</h1>
-            <p class="member-since">Member since Dec 2024</p>
+            <div class="moon-phase-display" v-if="moonData">
+              <div class="moon-phase-header">
+                <span class="moon-date">{{ formatDate(moonData.date) }}</span>
+                <span class="moon-circle">{{ moonData.moon_circle }}</span>
+                <span class="moon-name">{{ moonData.name }}</span>
+              </div>
+              <div class="moon-phase-details">
+                <div class="moon-energy">
+                  <span class="energy-label">Energy:</span>
+                  <div class="energy-bars">
+                    <div 
+                      class="energy-bar" 
+                      :class="{ active: moonData.energy === 'low' || moonData.energy === 'medium' || moonData.energy === 'high' }"
+                    ></div>
+                    <div 
+                      class="energy-bar" 
+                      :class="{ active: moonData.energy === 'medium' || moonData.energy === 'high' }"
+                    ></div>
+                    <div 
+                      class="energy-bar" 
+                      :class="{ active: moonData.energy === 'high' }"
+                    ></div>
+                  </div>
+                  <span class="energy-text">{{ moonData.energy }}</span>
+                </div>
+                <p class="moon-description">{{ moonData.description }}</p>
+              </div>
+            </div>
+            <div class="moon-phase-loading" v-else>
+              Loading moon phase...
+            </div>
           </div>
           <div class="stats-row">
             <button
@@ -191,6 +221,7 @@ import {
   Shield,
   TrendingUp,
   Check,
+  CoinsIcon,
 } from 'lucide-vue-next';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useAdminAccess } from 'src/composables/useAdminAccess';
@@ -227,8 +258,48 @@ const adminSectionRef = ref<InstanceType<typeof AdminSection> | null>(null);
 // Dark mode state
 const isDark = ref(false);
 
+// Moon phase data
+interface MoonData {
+  date: string;
+  lunar_day: number;
+  name: string;
+  energy: 'low' | 'medium' | 'high';
+  description: string;
+  moon_circle: string;
+}
+
+const moonData = ref<MoonData | null>(null);
+
+// Fetch moon phase data
+async function fetchMoonPhase() {
+  try {
+    const response = await fetch('https://maramataka-api.matou.nz/');
+    if (response.ok) {
+      const data = await response.json();
+      moonData.value = data;
+    } else {
+      console.error('Failed to fetch moon phase data');
+    }
+  } catch (error) {
+    console.error('Error fetching moon phase:', error);
+  }
+}
+
+// Format date for display
+function formatDate(dateString: string): string {
+  const date = new Date(dateString);
+  return date.toLocaleDateString('en-NZ', { 
+    day: 'numeric', 
+    month: 'long', 
+    year: 'numeric' 
+  });
+}
+
 onMounted(async () => {
   isDark.value = document.documentElement.classList.contains('dark');
+
+  // Fetch moon phase data
+  await fetchMoonPhase();
 
   // Check if user is admin
   const adminStatus = await checkAdminStatus();
@@ -269,9 +340,9 @@ const notificationStats = computed(() => [
     value: isAdmin.value ? pendingRegistrations.value.length : 0,
     icon: Users,
   },
-  { label: 'New Transactions', value: 7, icon: Shield },
-  { label: 'Proposal Updates', value: 5, icon: Vote },
-  { label: 'Contribution Actions', value: 2, icon: Target },
+  { label: 'New Transactions', value: 0, icon: CoinsIcon },
+  { label: 'Proposal Updates', value: 0, icon: Vote },
+  { label: 'Contribution Actions', value: 0, icon: Target },
 ]);
 
 // New members data
@@ -520,6 +591,104 @@ async function handleRefresh() {
   font-size: 0.875rem;
   color: rgba(255, 255, 255, 0.8);
   margin-top: 0.25rem;
+}
+
+// Moon Phase Display
+.moon-phase-display {
+  margin-top: 0.75rem;
+  padding: 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: var(--matou-radius);
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+}
+
+.moon-phase-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.moon-date {
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+}
+
+.moon-circle {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.moon-name {
+  font-size: 1rem;
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 600;
+}
+
+.moon-phase-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex: 1;
+  min-width: 200px;
+}
+
+.moon-energy {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.energy-label {
+  font-size: 0.8rem;
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+}
+
+.energy-bars {
+  display: flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+
+.energy-bar {
+  width: 20px;
+  height: 6px;
+  border-radius: 3px;
+  background-color: rgba(255, 255, 255, 0.2);
+  transition: all 0.2s ease;
+
+  &.active {
+    background-color: rgba(255, 255, 255, 0.9);
+  }
+}
+
+.energy-text {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.8);
+  text-transform: capitalize;
+  font-weight: 500;
+}
+
+.moon-description {
+  font-size: 0.85rem;
+  color: rgba(255, 255, 255, 0.85);
+  margin: 0;
+  line-height: 1.4;
+  font-style: italic;
+}
+
+.moon-phase-loading {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 .stats-row {

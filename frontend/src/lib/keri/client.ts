@@ -647,11 +647,14 @@ export class KERIClient {
     const oobiResult = await this.client.oobis().get(aidName, role);
 
     // The oobis().get() returns an object with the OOBI URL
-    const oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
+    let oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
 
     if (!oobi) {
       throw new Error(`No OOBI found for AID "${aidName}"`);
     }
+
+    // Normalize KERIA Docker hostname to localhost for browser access
+    oobi = oobi.replace(/http:\/\/keria:(\d+)/, 'http://localhost:$1');
 
     console.log(`[KERIClient] OOBI: ${oobi}`);
     return oobi;
@@ -840,8 +843,8 @@ export class KERIClient {
   }
 
   /**
-   * Send registration to all organization admins using IPEX apply
-   * This uses the IPEX protocol which KERIA knows how to route and notify
+   * Send registration to all organization admins
+   * Uses BOTH custom EXN (for our patch to create pending notifications) and IPEX apply (native support)
    * @param senderName - Name of the sender's AID
    * @param admins - Array of admin info with AIDs and optional OOBIs
    * @param registrationData - Registration details including sender's OOBI
@@ -867,14 +870,13 @@ export class KERIClient {
     const sent: string[] = [];
     const failed: string[] = [];
 
-    // Send to each admin using IPEX apply
+    // Send to each admin
     for (const admin of admins) {
       try {
         // Resolve admin OOBI and create contact
         if (admin.oobi) {
           console.log(`[KERIClient] Resolving admin OOBI and creating contact: ${admin.oobi}`);
           try {
-            // Resolve OOBI with alias to create a contact
             const alias = `admin-${admin.aid.substring(0, 8)}`;
             const op = await this.client.oobis().resolve(admin.oobi, alias);
             await this.client.operations().wait(op, { signal: AbortSignal.timeout(30000) });
@@ -887,58 +889,47 @@ export class KERIClient {
           console.warn(`[KERIClient] No OOBI provided for admin ${admin.aid}`);
         }
 
-        // Method 1: Send IPEX apply message
-        console.log(`[KERIClient] Creating IPEX apply for admin ${admin.aid}...`);
+        // 1. Send custom EXN message first
+        // Our KERIA patch creates pending notifications for escrowed custom EXN messages
+        console.log(`[KERIClient] Sending registration EXN to ${admin.aid}...`);
+        const payload = {
+          type: 'registration',
+          name: registrationData.name,
+          bio: registrationData.bio,
+          interests: registrationData.interests,
+          customInterests: registrationData.customInterests || '',
+          senderOOBI: registrationData.senderOOBI,
+          submittedAt: new Date().toISOString(),
+        };
+        const exnResult = await this.sendEXN(
+          senderName,
+          admin.aid,
+          '/matou/registration/apply',
+          payload
+        );
+        console.log(`[KERIClient] Custom EXN result:`, exnResult);
+
+        // 2. Also send IPEX apply for native KERIA notification support
+        // This provides a backup notification mechanism
         try {
-          const [apply, sigs, end] = await this.client.ipex().apply({
+          console.log(`[KERIClient] Sending IPEX apply to ${admin.aid}...`);
+          const [apply, applySigs, applyEnd] = await this.client.ipex().apply({
             senderName: senderName,
             recipient: admin.aid,
-            schemaSaid: schemaSaid,
-            message: JSON.stringify({
-              type: 'registration',
-              bio: registrationData.bio,
-              customInterests: registrationData.customInterests || '',
-              senderOOBI: registrationData.senderOOBI,
-              submittedAt: new Date().toISOString(),
-            }),
-            attributes: {
-              name: registrationData.name,
-              interests: registrationData.interests,
-            },
+            schema: schemaSaid,
+            attributes: {},
+            datetime: new Date().toISOString(),
           });
-
-          console.log(`[KERIClient] Submitting IPEX apply to ${admin.aid}...`);
-          await this.client.ipex().submitApply(senderName, apply, sigs, [admin.aid]);
-          console.log(`[KERIClient] IPEX apply sent successfully`);
+          await this.client.ipex().submitApply(senderName, apply, applySigs, applyEnd, [admin.aid]);
+          const applySaid = (apply as { ked?: { d?: string } })?.ked?.d || 'unknown';
+          console.log(`[KERIClient] IPEX apply sent, SAID: ${applySaid}`);
         } catch (ipexErr) {
-          console.warn(`[KERIClient] IPEX apply failed:`, ipexErr);
-        }
-
-        // Method 2: Send custom route EXN message
-        console.log(`[KERIClient] Sending custom route EXN to ${admin.aid}...`);
-        try {
-          const payload = {
-            type: 'registration',
-            name: registrationData.name,
-            bio: registrationData.bio,
-            interests: registrationData.interests,
-            customInterests: registrationData.customInterests || '',
-            senderOOBI: registrationData.senderOOBI,
-            submittedAt: new Date().toISOString(),
-          };
-          const exnResult = await this.sendEXN(
-            senderName,
-            admin.aid,
-            '/matou/registration/apply',
-            payload
-          );
-          console.log(`[KERIClient] Custom EXN result:`, exnResult);
-        } catch (exnErr) {
-          console.warn(`[KERIClient] Custom EXN failed:`, exnErr);
+          console.warn(`[KERIClient] IPEX apply failed (continuing with EXN):`, ipexErr);
+          // Continue - custom EXN is the primary mechanism
         }
 
         sent.push(admin.aid);
-        console.log(`[KERIClient] Registration sent to admin ${admin.aid} via both methods`);
+        console.log(`[KERIClient] Registration sent to admin ${admin.aid}`);
       } catch (err) {
         failed.push(admin.aid);
         console.error(`[KERIClient] Error sending to admin ${admin.aid}:`, err);
