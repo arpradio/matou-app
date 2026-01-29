@@ -14,15 +14,32 @@ import (
 )
 
 func main() {
-	fmt.Println("MATOU DAO Backend Server")
+	// Detect environment: "test" uses isolated data, configs, and ports
+	env := os.Getenv("MATOU_ENV")
+	isTest := env == "test"
+
+	if isTest {
+		fmt.Println("MATOU DAO Backend Server (TEST)")
+	} else {
+		fmt.Println("MATOU DAO Backend Server")
+	}
 	fmt.Println("============================")
 	fmt.Println()
 
-	// Load configuration
+	// Load configuration — test uses a separate bootstrap file
 	fmt.Println("Loading configuration...")
-	cfg, err := config.Load("", "config/bootstrap.yaml")
+	bootstrapPath := "config/bootstrap.yaml"
+	if isTest {
+		bootstrapPath = "config/bootstrap-test.yaml"
+	}
+	cfg, err := config.Load("", bootstrapPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Test mode uses port 9080 to avoid conflicting with dev server on 8080
+	if isTest {
+		cfg.Server.Port = 9080
 	}
 
 	fmt.Printf("  Configuration loaded\n")
@@ -31,10 +48,14 @@ func main() {
 	fmt.Printf("   Admin AID: %s\n", cfg.GetAdminAID())
 	fmt.Println()
 
-	// Initialize data directory
+	// Initialize data directory — test uses ./data-test
 	dataDir := os.Getenv("MATOU_DATA_DIR")
 	if dataDir == "" {
-		dataDir = "./data"
+		if isTest {
+			dataDir = "./data-test"
+		} else {
+			dataDir = "./data"
+		}
 	}
 	if err := os.MkdirAll(dataDir, 0755); err != nil {
 		log.Fatalf("Failed to create data directory: %v", err)
@@ -46,8 +67,12 @@ func main() {
 	// Select config file based on environment
 	anysyncConfigPath := os.Getenv("MATOU_ANYSYNC_CONFIG")
 	if anysyncConfigPath == "" {
-		// Default to host config when running on host
-		anysyncConfigPath = "config/client-host.yml"
+		if isTest {
+			// Test network uses ports 2001-2006
+			anysyncConfigPath = "../infrastructure/any-sync-test/client-host.yml"
+		} else {
+			anysyncConfigPath = "config/client-host.yml"
+		}
 	}
 
 	// Check if full SDK mode is enabled

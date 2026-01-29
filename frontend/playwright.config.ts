@@ -1,5 +1,8 @@
 import { defineConfig, devices } from '@playwright/test';
 
+// Test dev server port (separate from dev server on 9002)
+const TEST_SERVER_PORT = 9003;
+
 // Shared browser config
 const browserConfig = {
   ...devices['Desktop Chrome'],
@@ -24,7 +27,7 @@ export default defineConfig({
   reporter: [['html', { open: 'never' }], ['list']],
 
   use: {
-    baseURL: 'http://localhost:9002',
+    baseURL: `http://localhost:${TEST_SERVER_PORT}`,
     trace: 'on-first-retry',
     screenshot: 'on',
     video: 'on-first-retry',
@@ -34,14 +37,20 @@ export default defineConfig({
     // Org setup must run first - creates the organization
     {
       name: 'org-setup',
-      testMatch: /org-setup\.spec\.ts/,
+      testMatch: /e2e-org-setup\.spec\.ts/,
       use: browserConfig,
     },
     // Registration tests depend on org existing
     {
       name: 'registration',
-      testMatch: /registration\.spec\.ts/,
+      testMatch: /e2e-registration\.spec\.ts/,
       dependencies: ['org-setup'],
+      use: browserConfig,
+    },
+    // Recovery & error handling - independent
+    {
+      name: 'recovery-errors',
+      testMatch: /e2e-recovery-errors\.spec\.ts/,
       use: browserConfig,
     },
     // Default project for running individual test files
@@ -53,10 +62,12 @@ export default defineConfig({
 
   outputDir: './tests/e2e/results',
 
-  // Don't start dev server - assume it's already running
-  // webServer: {
-  //   command: 'npm run dev',
-  //   url: 'http://localhost:9002',
-  //   reuseExistingServer: true,
-  // },
+  // Auto-start a test dev server on port 9003 with KERI test network env vars.
+  // Runs alongside the regular dev server (port 9002) without interference.
+  webServer: {
+    command: `npm run test:serve`,
+    url: `http://localhost:${TEST_SERVER_PORT}`,
+    reuseExistingServer: true,
+    timeout: 120000,
+  },
 });

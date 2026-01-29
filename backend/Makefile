@@ -12,6 +12,10 @@ build:
 run: build
 	./bin/server
 
+# Run server in test mode (isolated data, test any-sync network)
+run-test:
+	MATOU_ENV=test go run ./cmd/server
+
 # =============================================================================
 # Testing
 # =============================================================================
@@ -95,6 +99,7 @@ help:
 	@echo "Build:"
 	@echo "  make build              - Build the server binary"
 	@echo "  make run                - Build and run the server"
+	@echo "  make run-test           - Run server in test mode (isolated data)"
 	@echo ""
 	@echo "Testing:"
 	@echo "  make test               - Run unit tests"
@@ -118,6 +123,6 @@ help:
 	@echo "Cleanup:"
 	@echo "  make clean              - Remove build artifacts"
 
-.PHONY: build run test test-coverage test-integration test-integration-keep test-all \
+.PHONY: build run run-test test test-coverage test-integration test-integration-keep test-all \
         testnet-up testnet-down testnet-clean testnet-status testnet-health \
         lint fmt vet clean help

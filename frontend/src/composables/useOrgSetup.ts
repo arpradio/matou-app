@@ -24,9 +24,10 @@ export interface OrgSetupResult {
 }
 
 // Membership credential schema SAID (from schema server)
-// The schema server is accessible from KERIA via Docker network
 const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
-const SCHEMA_OOBI_URL = `http://schema-server:7723/oobi/${MEMBERSHIP_SCHEMA_SAID}`;
+// Schema server URL as seen by KERIA inside Docker (configurable per environment)
+const SCHEMA_SERVER_URL = import.meta.env.VITE_SCHEMA_SERVER_URL || 'http://schema-server:7723';
+const SCHEMA_OOBI_URL = `${SCHEMA_SERVER_URL}/oobi/${MEMBERSHIP_SCHEMA_SAID}`;
 
 export function useOrgSetup() {
   const keriClient = useKERIClient();
@@ -123,7 +124,8 @@ export function useOrgSetup() {
         orgOobi = await keriClient.getOOBI(orgAidName);
       } catch {
         // Fallback to constructing OOBI URL manually
-        orgOobi = `http://localhost:3902/oobi/${orgAid.prefix}`;
+        const cesrUrl = import.meta.env.VITE_KERIA_CESR_URL || 'http://localhost:3902';
+        orgOobi = `${cesrUrl}/oobi/${orgAid.prefix}`;
         console.log('[OrgSetup] Using fallback OOBI URL:', orgOobi);
       }
 
@@ -134,7 +136,8 @@ export function useOrgSetup() {
         console.log('[OrgSetup] Admin OOBI:', adminOobi);
       } catch {
         // Fallback to constructing OOBI URL manually
-        adminOobi = `http://localhost:3902/oobi/${adminAid.prefix}`;
+        const adminCesrUrl = import.meta.env.VITE_KERIA_CESR_URL || 'http://localhost:3902';
+        adminOobi = `${adminCesrUrl}/oobi/${adminAid.prefix}`;
         console.log('[OrgSetup] Using fallback admin OOBI URL:', adminOobi);
       }
 

@@ -97,9 +97,9 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
         }
       } else {
         // Fallback: try default schema server URL with known schema SAID
-        // Use Docker network hostname (schema-server) for KERIA to access
         const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
-        const fallbackSchemaOOBI = `http://schema-server:7723/oobi/${MEMBERSHIP_SCHEMA_SAID}`;
+        const schemaServerUrl = import.meta.env.VITE_SCHEMA_SERVER_URL || 'http://schema-server:7723';
+        const fallbackSchemaOOBI = `${schemaServerUrl}/oobi/${MEMBERSHIP_SCHEMA_SAID}`;
         try {
           await keriClient.resolveOOBI(fallbackSchemaOOBI, undefined, 10000);
           console.log('[CredentialPolling] Resolved schema OOBI (fallback):', fallbackSchemaOOBI);

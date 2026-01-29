@@ -1,0 +1,27 @@
+# MATOU Bootstrap Configuration (TEST)
+# Used by: MATOU_ENV=test go run ./cmd/server
+# Isolated from development bootstrap.yaml
+
+organization:
+  name: "MATOU"
+  aid: "placeholder"  # Set during org setup
+  alias: "matou-org"
+  witnesses: []
+  witnessThreshold: 0
+
+admin:
+  aid: ""  # Set during org setup
+  alias: "matou-admin"
+  delegatedBy: ""
+  credentials:
+    membership: ""
+    steward: ""
+
+admins: []  # Populated during org setup
+
+orgSpace:
+  spaceId: ""  # Set when community space is created
+  accessControl:
+    type: "membership"
+    schema: "EMatouMembershipSchemaV1"
+    issuer: ""
