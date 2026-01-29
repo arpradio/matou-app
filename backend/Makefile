@@ -50,23 +50,23 @@ test-all: test test-integration
 
 # Start the test network manually
 testnet-up:
-	cd ../infrastructure/any-sync-test && make up
+	cd ../infrastructure/any-sync && make up-test
 
 # Stop the test network
 testnet-down:
-	cd ../infrastructure/any-sync-test && make down
+	cd ../infrastructure/any-sync && make down-test
 
 # Clean test network (remove all data)
 testnet-clean:
-	cd ../infrastructure/any-sync-test && make clean
+	cd ../infrastructure/any-sync && make clean-test
 
 # Check test network status
 testnet-status:
-	cd ../infrastructure/any-sync-test && make status
+	cd ../infrastructure/any-sync && make status-test
 
 # Check test network health
 testnet-health:
-	cd ../infrastructure/any-sync-test && make health
+	cd ../infrastructure/any-sync && make health-test
 
 # =============================================================================
 # Code Quality

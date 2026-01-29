@@ -67,10 +67,10 @@ func getInfrastructurePath() (string, error) {
 		return "", fmt.Errorf("failed to get caller info")
 	}
 
-	// Navigate from backend/internal/anysync/testnet to infrastructure/any-sync-test
+	// Navigate from backend/internal/anysync/testnet to infrastructure/any-sync
 	// backend/internal/anysync/testnet -> backend/internal/anysync -> backend/internal -> backend -> project root
 	projectRoot := filepath.Join(filepath.Dir(filename), "..", "..", "..", "..")
-	infraPath := filepath.Join(projectRoot, "infrastructure", "any-sync-test")
+	infraPath := filepath.Join(projectRoot, "infrastructure", "any-sync")
 
 	// Verify it exists
 	if _, err := os.Stat(infraPath); os.IsNotExist(err) {
@@ -94,7 +94,7 @@ func SetupWithConfig(cfg *Config) *Network {
 	}
 
 	network := &Network{
-		ConfigPath:     filepath.Join(infraPath, "client-host.yml"),
+		ConfigPath:     filepath.Join(infraPath, "client-host-test.yml"),
 		CoordinatorURL: "localhost:2004",
 		keepRunning:    cfg.KeepRunning,
 	}
@@ -130,7 +130,7 @@ func SetupWithConfig(cfg *Config) *Network {
 
 // isRunning checks if the test network is already running
 func (n *Network) isRunning(infraPath string) bool {
-	cmd := exec.Command("make", "-s", "is-running")
+	cmd := exec.Command("make", "-s", "is-running-test")
 	cmd.Dir = infraPath
 	output, err := cmd.Output()
 	if err != nil {
@@ -144,8 +144,8 @@ func (n *Network) start(ctx context.Context, infraPath string, verbose bool) err
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	// Run make start-and-wait
-	cmd := exec.CommandContext(ctx, "make", "start-and-wait")
+	// Run make start-and-wait-test
+	cmd := exec.CommandContext(ctx, "make", "start-and-wait-test")
 	cmd.Dir = infraPath
 
 	if verbose {
@@ -188,7 +188,7 @@ func (n *Network) Teardown() {
 	defer n.mu.Unlock()
 
 	fmt.Println("testnet: stopping network...")
-	cmd := exec.Command("make", "down")
+	cmd := exec.Command("make", "down-test")
 	cmd.Dir = infraPath
 	if err := cmd.Run(); err != nil {
 		fmt.Printf("testnet: warning: failed to stop network: %v\n", err)
@@ -205,7 +205,7 @@ func (n *Network) Clean() error {
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
-	cmd := exec.Command("make", "clean")
+	cmd := exec.Command("make", "clean-test")
 	cmd.Dir = infraPath
 	return cmd.Run()
 }
@@ -234,7 +234,7 @@ func (n *Network) WaitForReady(ctx context.Context) error {
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, "make", "wait")
+	cmd := exec.CommandContext(ctx, "make", "wait-test")
 	cmd.Dir = infraPath
 	return cmd.Run()
 }
@@ -246,7 +246,7 @@ func (n *Network) IsHealthy() bool {
 		return false
 	}
 
-	cmd := exec.Command("make", "-s", "ready")
+	cmd := exec.Command("make", "-s", "ready-test")
 	cmd.Dir = infraPath
 	output, err := cmd.Output()
 	if err != nil {

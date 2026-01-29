@@ -69,7 +69,7 @@ func main() {
 	if anysyncConfigPath == "" {
 		if isTest {
 			// Test network uses ports 2001-2006
-			anysyncConfigPath = "../infrastructure/any-sync-test/client-host.yml"
+			anysyncConfigPath = "../infrastructure/any-sync/client-host-test.yml"
 		} else {
 			anysyncConfigPath = "config/client-host.yml"
 		}
