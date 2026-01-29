@@ -84,14 +84,13 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
     // Verify admin is on dashboard and is recognized as admin
     await expect(adminPage).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.short });
 
-    // Wait for admin section to be visible (proves admin status)
-    const adminSection = adminPage.locator('.admin-area');
-    await expect(adminSection).toBeVisible({ timeout: TIMEOUT.medium });
+    // Wait for admin section to render (admin check runs in onMounted)
+    console.log('[Test] Waiting for Invite Member button...');
+    const inviteBtn = adminPage.getByRole('button', { name: /invite member/i });
+    await expect(inviteBtn).toBeVisible({ timeout: TIMEOUT.long });
 
     // Click "Invite Member" button
     console.log('[Test] Clicking Invite Member...');
-    const inviteBtn = adminPage.locator('.invite-btn');
-    await expect(inviteBtn).toBeVisible({ timeout: TIMEOUT.short });
     await inviteBtn.click();
 
     // Fill invite form in modal
