@@ -163,35 +163,66 @@ test.describe.serial('Registration Approval Flow', () => {
     const userName = `Message_${uniqueSuffix()}`;
 
     try {
-      // User registers (stays pending)
+      // 1. User registers (stays pending)
       await registerUser(userPage, userName);
 
-      // Wait for admin to see registration card
+      // 2. Wait for admin to see the registration card
       const adminSection = adminPage.locator('.admin-section');
       await expect(adminSection).toBeVisible({ timeout: TIMEOUT.medium });
 
       const registrationCard = adminPage.locator('.registration-card').filter({ hasText: userName });
       await expect(registrationCard).toBeVisible({ timeout: TIMEOUT.long });
 
-      // Admin clicks message button
-      console.log('[Test] Admin clicking message...');
-      const messageBtn = registrationCard.getByRole('button', { name: /message/i });
-      await expect(messageBtn).toBeVisible({ timeout: TIMEOUT.short });
-      await messageBtn.click();
+      // 3. Click message on card → opens RegistrationModal (detail dialog)
+      console.log('[Test] Admin clicking message on card...');
+      const cardMessageBtn = registrationCard.getByRole('button', { name: /message/i });
+      await expect(cardMessageBtn).toBeVisible({ timeout: TIMEOUT.short });
+      await cardMessageBtn.click();
 
-      // Fill and send message
+      // 4. RegistrationModal opens — click "Message" in modal footer to reveal textarea
       const modal = adminPage.locator('.modal-content');
       await expect(modal).toBeVisible({ timeout: TIMEOUT.short });
+      console.log('[Test] Registration detail modal opened');
+
+      const modalMessageBtn = modal.getByRole('button', { name: /^message$/i });
+      await expect(modalMessageBtn).toBeVisible({ timeout: TIMEOUT.short });
+      await modalMessageBtn.click();
+
+      // 5. Fill textarea and click "Send Message"
+      await expect(modal.locator('textarea')).toBeVisible({ timeout: TIMEOUT.short });
       await modal.locator('textarea').fill('Please provide more details about your background.');
-      await modal.getByRole('button', { name: /send/i }).click();
+      await modal.getByRole('button', { name: /send message/i }).click();
       console.log('[Test] Admin sent message');
 
-      // User receives message
+      // 6. User receives admin message
       console.log('[Test] Waiting for user to receive message...');
       await expect(
         userPage.getByText(/please provide more details/i),
       ).toBeVisible({ timeout: TIMEOUT.long });
-      console.log('[Test] PASS - User received message');
+      console.log('[Test] User received admin message');
+
+      // 7. User types a reply
+      console.log('[Test] User sending reply...');
+      const replyTextarea = userPage.locator('textarea[placeholder="Type your reply..."]');
+      await expect(replyTextarea).toBeVisible({ timeout: TIMEOUT.short });
+      await replyTextarea.fill('I have 5 years of experience in community organizing.');
+
+      const sendReplyBtn = userPage.locator('button', { hasText: /^send$/i });
+      await expect(sendReplyBtn).toBeEnabled({ timeout: TIMEOUT.short });
+      await sendReplyBtn.click();
+
+      // 8. Verify reply was sent (textarea clears on success)
+      await expect(replyTextarea).toHaveValue('', { timeout: TIMEOUT.medium });
+      console.log('[Test] User reply sent');
+
+      // 9. Admin receives the reply (poll picks up message_reply notification)
+      console.log('[Test] Waiting for admin to receive reply...');
+      const replyReceived = adminPage.waitForEvent('console', {
+        predicate: msg => msg.text().includes('New applicant message received'),
+        timeout: TIMEOUT.long,
+      });
+      await replyReceived;
+      console.log('[Test] PASS - Admin received user reply');
     } finally {
       await userContext.close();
     }
