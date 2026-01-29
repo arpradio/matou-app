@@ -66,6 +66,7 @@ func (m *mockSyncAnySyncClient) SyncDocument(ctx context.Context, spaceID string
 func (m *mockSyncAnySyncClient) GetNetworkID() string      { return "test-network" }
 func (m *mockSyncAnySyncClient) GetCoordinatorURL() string { return "http://localhost:1004" }
 func (m *mockSyncAnySyncClient) GetPeerID() string         { return "test-peer-123" }
+func (m *mockSyncAnySyncClient) Ping() error               { return nil }
 func (m *mockSyncAnySyncClient) Close() error              { return nil }
 
 func setupSyncTestHandler(t *testing.T) (*SyncHandler, *anystore.LocalStore, func()) {

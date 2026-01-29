@@ -63,19 +63,21 @@ func (m *mockAnySyncClientForIntegration) SyncDocument(ctx context.Context, spac
 func (m *mockAnySyncClientForIntegration) GetNetworkID() string      { return "test-network" }
 func (m *mockAnySyncClientForIntegration) GetCoordinatorURL() string { return "http://localhost:1004" }
 func (m *mockAnySyncClientForIntegration) GetPeerID() string         { return "test-peer-123" }
+func (m *mockAnySyncClientForIntegration) Ping() error               { return nil }
 func (m *mockAnySyncClientForIntegration) Close() error              { return nil }
 
 // IntegrationTestEnv provides a complete test environment for integration testing
 type IntegrationTestEnv struct {
-	store        *anystore.LocalStore
-	spaceManager *anysync.SpaceManager
-	spaceStore   anysync.SpaceStore
-	keriClient   *keri.Client
-	syncHandler  *SyncHandler
-	trustHandler *TrustHandler
-	credHandler  *CredentialsHandler
-	mux          *http.ServeMux
-	cleanup      func()
+	store         *anystore.LocalStore
+	spaceManager  *anysync.SpaceManager
+	spaceStore    anysync.SpaceStore
+	keriClient    *keri.Client
+	syncHandler   *SyncHandler
+	trustHandler  *TrustHandler
+	credHandler   *CredentialsHandler
+	spacesHandler *SpacesHandler
+	mux           *http.ServeMux
+	cleanup       func()
 }
 
 // setupIntegrationEnv creates a full integration test environment
@@ -120,12 +122,17 @@ func setupIntegrationEnv(t *testing.T) *IntegrationTestEnv {
 	credHandler := NewCredentialsHandler(keriClient, store)
 	syncHandler := NewSyncHandler(keriClient, store, spaceManager, spaceStore)
 	trustHandler := NewTrustHandler(store, "EOrg123456789TestOrg")
+	spacesHandler := &SpacesHandler{
+		spaceManager: spaceManager,
+		spaceStore:   spaceStore,
+	}
 
 	// Create mux and register routes
 	mux := http.NewServeMux()
 	credHandler.RegisterRoutes(mux)
 	syncHandler.RegisterRoutes(mux)
 	trustHandler.RegisterRoutes(mux)
+	spacesHandler.RegisterRoutes(mux)
 
 	cleanup := func() {
 		store.Close()
@@ -133,15 +140,16 @@ func setupIntegrationEnv(t *testing.T) *IntegrationTestEnv {
 	}
 
 	return &IntegrationTestEnv{
-		store:        store,
-		spaceManager: spaceManager,
-		spaceStore:   spaceStore,
-		keriClient:   keriClient,
-		syncHandler:  syncHandler,
-		trustHandler: trustHandler,
-		credHandler:  credHandler,
-		mux:          mux,
-		cleanup:      cleanup,
+		store:         store,
+		spaceManager:  spaceManager,
+		spaceStore:    spaceStore,
+		keriClient:    keriClient,
+		syncHandler:   syncHandler,
+		trustHandler:  trustHandler,
+		credHandler:   credHandler,
+		spacesHandler: spacesHandler,
+		mux:           mux,
+		cleanup:       cleanup,
 	}
 }
 
@@ -1109,5 +1117,125 @@ func TestIntegration_ListAllCredentials(t *testing.T) {
 	}
 	if len(listResp.Credentials) != 2 {
 		t.Errorf("expected 2 credentials in array, got %d", len(listResp.Credentials))
+	}
+}
+
+// ============================================
+// Integration Test: Invite Flow with Space Sync
+// ============================================
+
+func TestIntegration_InviteFlowWithSpaceSync(t *testing.T) {
+	env := setupIntegrationEnv(t)
+	defer env.cleanup()
+
+	// Step 1: Create community space
+	createBody := `{"orgAid": "EOrg123456789TestOrg", "orgName": "Test Org"}`
+	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/spaces/community", bytes.NewBufferString(createBody))
+	createReq.Header.Set("Content-Type", "application/json")
+	createW := httptest.NewRecorder()
+
+	env.mux.ServeHTTP(createW, createReq)
+
+	if createW.Code != http.StatusOK {
+		t.Fatalf("create community space failed: %d - %s", createW.Code, createW.Body.String())
+	}
+
+	var createResp CreateCommunityResponse
+	if err := json.NewDecoder(createW.Body).Decode(&createResp); err != nil {
+		t.Fatalf("failed to decode create response: %v", err)
+	}
+	if !createResp.Success {
+		t.Fatalf("create community space not successful: %s", createResp.Error)
+	}
+
+	// Step 2: Invite user
+	inviteBody := `{
+		"recipientAid": "EUSER_INVITE_001",
+		"credentialSaid": "ESAID_INVITE_001",
+		"schema": "EMatouMembershipSchemaV1"
+	}`
+	inviteReq := httptest.NewRequest(http.MethodPost, "/api/v1/spaces/community/invite", bytes.NewBufferString(inviteBody))
+	inviteReq.Header.Set("Content-Type", "application/json")
+	inviteW := httptest.NewRecorder()
+
+	env.mux.ServeHTTP(inviteW, inviteReq)
+
+	if inviteW.Code != http.StatusOK {
+		t.Fatalf("invite failed: %d - %s", inviteW.Code, inviteW.Body.String())
+	}
+
+	var inviteResp InviteResponse
+	if err := json.NewDecoder(inviteW.Body).Decode(&inviteResp); err != nil {
+		t.Fatalf("failed to decode invite response: %v", err)
+	}
+
+	if !inviteResp.Success {
+		t.Fatalf("invite not successful: %s", inviteResp.Error)
+	}
+	if inviteResp.PrivateSpaceID == "" {
+		t.Error("expected non-empty private space ID")
+	}
+	if inviteResp.CommunitySpaceID == "" {
+		t.Error("expected non-empty community space ID")
+	}
+
+	// Step 3: Sync credential
+	syncBody := `{
+		"userAid": "EUSER_INVITE_001",
+		"credentials": [
+			{
+				"said": "ESAID_INVITE_001",
+				"issuer": "EOrg123456789TestOrg",
+				"recipient": "EUSER_INVITE_001",
+				"schema": "EMatouMembershipSchemaV1",
+				"data": {
+					"communityName": "MATOU",
+					"role": "Member",
+					"verificationStatus": "unverified",
+					"permissions": ["read", "comment"],
+					"joinedAt": "2026-01-29T00:00:00Z"
+				}
+			}
+		]
+	}`
+	syncReq := httptest.NewRequest(http.MethodPost, "/api/v1/sync/credentials", bytes.NewBufferString(syncBody))
+	syncReq.Header.Set("Content-Type", "application/json")
+	syncW := httptest.NewRecorder()
+
+	env.mux.ServeHTTP(syncW, syncReq)
+
+	if syncW.Code != http.StatusOK {
+		t.Fatalf("sync failed: %d - %s", syncW.Code, syncW.Body.String())
+	}
+
+	var syncResp SyncCredentialsResponse
+	if err := json.NewDecoder(syncW.Body).Decode(&syncResp); err != nil {
+		t.Fatalf("failed to decode sync response: %v", err)
+	}
+
+	if syncResp.Synced != 1 {
+		t.Errorf("expected 1 synced, got %d", syncResp.Synced)
+	}
+	if len(syncResp.Spaces) == 0 {
+		t.Error("expected non-empty spaces list in sync response")
+	}
+
+	// Step 4: Get community members — should include the invited user
+	membersReq := httptest.NewRequest(http.MethodGet, "/api/v1/community/members", nil)
+	membersW := httptest.NewRecorder()
+
+	env.mux.ServeHTTP(membersW, membersReq)
+
+	if membersW.Code != http.StatusOK {
+		t.Fatalf("get members failed: %d - %s", membersW.Code, membersW.Body.String())
+	}
+
+	var membersResp CommunityMembersResponse
+	if err := json.NewDecoder(membersW.Body).Decode(&membersResp); err != nil {
+		t.Fatalf("failed to decode members response: %v", err)
+	}
+
+	if membersResp.Total != 1 {
+		t.Errorf("expected 1 community member, got %d", membersResp.Total)
 	}
 }

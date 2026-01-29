@@ -6,6 +6,7 @@ import { ref, onUnmounted } from 'vue';
 import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
 import { fetchOrgConfig } from 'src/api/config';
+import { BACKEND_URL } from 'src/lib/api/client';
 
 export interface CredentialPollingOptions {
   pollingInterval?: number; // Default: 5000ms
@@ -444,12 +445,28 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     }
 
     try {
-      const syncResponse = await fetch('http://localhost:8080/api/v1/sync/credentials', {
+      // Map the signify-ts credential to the backend's keri.Credential format
+      const sad = credential.value.sad || credential.value;
+      const backendCredential = {
+        said: sad.d || '',
+        issuer: sad.i || '',
+        recipient: sad.a?.i || currentAID.prefix,
+        schema: sad.s || '',
+        data: {
+          communityName: sad.a?.communityName || '',
+          role: sad.a?.role || '',
+          verificationStatus: sad.a?.verificationStatus || 'unverified',
+          permissions: sad.a?.permissions || [],
+          joinedAt: sad.a?.joinedAt || new Date().toISOString(),
+        },
+      };
+
+      const syncResponse = await fetch(`${BACKEND_URL}/api/v1/sync/credentials`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           userAid: currentAID.prefix,
-          credentialSaid: credential.value.sad?.d || credential.value.d,
+          credentials: [backendCredential],
         }),
         signal: AbortSignal.timeout(15000),
       });

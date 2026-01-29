@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"time"
 )
@@ -184,11 +185,12 @@ func (m *SpaceManager) AddToCommunitySpace(ctx context.Context, cred *Credential
 		return fmt.Errorf("community space ID not configured")
 	}
 
-	// In production, this would sync the credential to the community space via any-sync
-	// For now, we just validate the credential can be added
-	// The actual sync will use the any-sync SDK's space document operations
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return fmt.Errorf("marshaling credential for community space: %w", err)
+	}
 
-	return nil
+	return m.client.SyncDocument(ctx, m.communitySpaceID, cred.SAID, data)
 }
 
 // SyncToPrivateSpace syncs a credential to a user's private space
@@ -199,11 +201,12 @@ func (m *SpaceManager) SyncToPrivateSpace(ctx context.Context, userAID string, c
 		return fmt.Errorf("getting private space: %w", err)
 	}
 
-	// In production, this would sync the credential to the private space via any-sync
-	// For now, we just log the operation
-	_ = space // Use space in production implementation
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return fmt.Errorf("marshaling credential for private space: %w", err)
+	}
 
-	return nil
+	return m.client.SyncDocument(ctx, space.SpaceID, cred.SAID, data)
 }
 
 // RouteCredential determines where a credential should be stored and syncs it

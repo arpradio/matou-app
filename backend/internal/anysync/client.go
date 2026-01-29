@@ -5,6 +5,7 @@ package anysync
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -343,8 +344,47 @@ func (c *Client) AddToACL(ctx context.Context, spaceID string, peerID string, pe
 		return fmt.Errorf("client not initialized")
 	}
 
-	// TODO: Implement full ACL management using aclclient
-	// This requires opening the space and adding an ACL record
+	// Ensure space directory exists
+	spaceDir := filepath.Join(c.dataDir, "spaces", spaceID)
+	if err := os.MkdirAll(spaceDir, 0755); err != nil {
+		return fmt.Errorf("creating space directory: %w", err)
+	}
+
+	aclPath := filepath.Join(spaceDir, "acl.json")
+
+	// Load existing ACL entries
+	var entries []localACLEntry
+	if data, err := os.ReadFile(aclPath); err == nil {
+		if err := json.Unmarshal(data, &entries); err != nil {
+			return fmt.Errorf("parsing existing ACL: %w", err)
+		}
+	}
+
+	// Check if peer already exists — update in place (idempotent)
+	now := time.Now().UTC().Format(time.RFC3339)
+	found := false
+	for i := range entries {
+		if entries[i].PeerID == peerID {
+			entries[i].Permissions = permissions
+			entries[i].UpdatedAt = now
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		entries = append(entries, localACLEntry{
+			PeerID:      peerID,
+			Permissions: permissions,
+			AddedAt:     now,
+			UpdatedAt:   now,
+		})
+	}
+
+	if err := writeJSONFile(aclPath, entries); err != nil {
+		return fmt.Errorf("writing ACL: %w", err)
+	}
+
 	fmt.Printf("[any-sync] AddToACL: space=%s peer=%s permissions=%v\n", spaceID, peerID, permissions)
 	return nil
 }
@@ -358,7 +398,24 @@ func (c *Client) SyncDocument(ctx context.Context, spaceID string, docID string,
 		return fmt.Errorf("client not initialized")
 	}
 
-	// TODO: Implement document sync using object tree
+	// Create documents directory for this space
+	docsDir := filepath.Join(c.dataDir, "spaces", spaceID, "documents")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		return fmt.Errorf("creating documents directory: %w", err)
+	}
+
+	doc := localDocument{
+		DocID:    docID,
+		SpaceID:  spaceID,
+		Data:     json.RawMessage(data),
+		SyncedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	docPath := filepath.Join(docsDir, docID+".json")
+	if err := writeJSONFile(docPath, doc); err != nil {
+		return fmt.Errorf("writing document: %w", err)
+	}
+
 	fmt.Printf("[any-sync] SyncDocument: space=%s doc=%s size=%d\n", spaceID, docID, len(data))
 	return nil
 }
@@ -425,6 +482,31 @@ func (c *Client) Close() error {
 
 	c.initialized = false
 	return nil
+}
+
+// localACLEntry represents a single ACL entry stored in a local JSON file
+type localACLEntry struct {
+	PeerID      string   `json:"peerId"`
+	Permissions []string `json:"permissions"`
+	AddedAt     string   `json:"addedAt"`
+	UpdatedAt   string   `json:"updatedAt"`
+}
+
+// localDocument represents a document stored in a local JSON file
+type localDocument struct {
+	DocID    string          `json:"docId"`
+	SpaceID  string          `json:"spaceId"`
+	Data     json.RawMessage `json:"data"`
+	SyncedAt string          `json:"syncedAt"`
+}
+
+// writeJSONFile marshals v to JSON and writes it to path
+func writeJSONFile(path string, v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling JSON: %w", err)
+	}
+	return os.WriteFile(path, data, 0644)
 }
 
 // generateReplicationKey generates a replication key from a signing key

@@ -4,6 +4,7 @@ package anysync
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ import (
 	"github.com/anyproto/any-sync/commonspace/peermanager"
 	"github.com/anyproto/any-sync/commonspace/spacepayloads"
 	"github.com/anyproto/any-sync/commonspace/spacestorage"
+	"github.com/anyproto/any-sync/consensus/consensusproto"
 	"github.com/anyproto/any-sync/coordinator/coordinatorclient"
 	"github.com/anyproto/any-sync/net/peer"
 	"github.com/anyproto/any-sync/net/peerservice"
@@ -332,8 +334,34 @@ func (c *SDKClient) AddToACL(ctx context.Context, spaceID string, peerID string,
 		return fmt.Errorf("client not initialized")
 	}
 
-	// TODO: Implement full ACL management via coordinator
-	// This would require opening the space and adding an ACL record
+	// Build ACL record payload
+	payload := map[string]interface{}{
+		"peerId":      peerID,
+		"spaceId":     spaceID,
+		"permissions": permissions,
+		"timestamp":   time.Now().UTC().Format(time.RFC3339),
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshaling ACL record: %w", err)
+	}
+
+	record := &consensusproto.RawRecord{
+		Payload: data,
+	}
+
+	_, err = c.coordinator.AclAddRecord(ctx, spaceID, record)
+	if err != nil {
+		// Tolerate "already exists" errors gracefully
+		errStr := err.Error()
+		if strings.Contains(errStr, "already exists") ||
+			strings.Contains(errStr, "duplicate") {
+			fmt.Printf("[any-sync SDK] AddToACL: peer %s already in ACL for space %s\n", peerID, spaceID)
+			return nil
+		}
+		return fmt.Errorf("adding ACL record via coordinator: %w", err)
+	}
+
 	fmt.Printf("[any-sync SDK] AddToACL: space=%s peer=%s permissions=%v\n", spaceID, peerID, permissions)
 	return nil
 }
@@ -347,9 +375,33 @@ func (c *SDKClient) SyncDocument(ctx context.Context, spaceID string, docID stri
 		return fmt.Errorf("client not initialized")
 	}
 
-	// TODO: Implement document sync using object tree
+	// TODO: Use space service tree operations when full SDK infrastructure is available.
+	// For now, persist to local filesystem — data will be synced to the tree
+	// when tree sync infrastructure is operational.
+	if err := c.storeDocumentLocally(spaceID, docID, data); err != nil {
+		return fmt.Errorf("storing document locally: %w", err)
+	}
+
 	fmt.Printf("[any-sync SDK] SyncDocument: space=%s doc=%s size=%d\n", spaceID, docID, len(data))
 	return nil
+}
+
+// storeDocumentLocally persists a document to the local filesystem
+func (c *SDKClient) storeDocumentLocally(spaceID, docID string, data []byte) error {
+	docsDir := filepath.Join(c.dataDir, "spaces", spaceID, "documents")
+	if err := os.MkdirAll(docsDir, 0755); err != nil {
+		return fmt.Errorf("creating documents directory: %w", err)
+	}
+
+	doc := localDocument{
+		DocID:    docID,
+		SpaceID:  spaceID,
+		Data:     json.RawMessage(data),
+		SyncedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+
+	docPath := filepath.Join(docsDir, docID+".json")
+	return writeJSONFile(docPath, doc)
 }
 
 // Ping tests connectivity to the any-sync coordinator

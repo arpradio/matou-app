@@ -2,6 +2,7 @@ package anysync
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -256,6 +257,141 @@ func TestClient_SyncDocument(t *testing.T) {
 	err := client.SyncDocument(ctx, spaceID, docID, data)
 	if err != nil {
 		t.Fatalf("failed to sync document: %v", err)
+	}
+}
+
+func TestClient_AddToACL_PersistsToFile(t *testing.T) {
+	client, tmpDir := setupTestClientWithDir(t)
+	defer func() {
+		client.Close()
+		os.RemoveAll(tmpDir)
+	}()
+
+	ctx := context.Background()
+	spaceID := "space_acl_test"
+	peerID := "12D3KooWTestPeer"
+	permissions := []string{"read", "write"}
+
+	err := client.AddToACL(ctx, spaceID, peerID, permissions)
+	if err != nil {
+		t.Fatalf("AddToACL failed: %v", err)
+	}
+
+	// Read and verify acl.json
+	aclPath := filepath.Join(tmpDir, "spaces", spaceID, "acl.json")
+	data, err := os.ReadFile(aclPath)
+	if err != nil {
+		t.Fatalf("failed to read acl.json: %v", err)
+	}
+
+	var entries []localACLEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("failed to parse acl.json: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 ACL entry, got %d", len(entries))
+	}
+	if entries[0].PeerID != peerID {
+		t.Errorf("expected peerID %s, got %s", peerID, entries[0].PeerID)
+	}
+	if len(entries[0].Permissions) != 2 || entries[0].Permissions[0] != "read" {
+		t.Errorf("unexpected permissions: %v", entries[0].Permissions)
+	}
+	if entries[0].AddedAt == "" {
+		t.Error("expected non-empty AddedAt")
+	}
+}
+
+func TestClient_AddToACL_Idempotent(t *testing.T) {
+	client, tmpDir := setupTestClientWithDir(t)
+	defer func() {
+		client.Close()
+		os.RemoveAll(tmpDir)
+	}()
+
+	ctx := context.Background()
+	spaceID := "space_acl_idem"
+	peerID := "12D3KooWTestPeer"
+
+	// Add with initial permissions
+	err := client.AddToACL(ctx, spaceID, peerID, []string{"read"})
+	if err != nil {
+		t.Fatalf("first AddToACL failed: %v", err)
+	}
+
+	// Add again with updated permissions
+	err = client.AddToACL(ctx, spaceID, peerID, []string{"read", "write", "admin"})
+	if err != nil {
+		t.Fatalf("second AddToACL failed: %v", err)
+	}
+
+	// Read and verify — should be single entry with updated permissions
+	aclPath := filepath.Join(tmpDir, "spaces", spaceID, "acl.json")
+	data, err := os.ReadFile(aclPath)
+	if err != nil {
+		t.Fatalf("failed to read acl.json: %v", err)
+	}
+
+	var entries []localACLEntry
+	if err := json.Unmarshal(data, &entries); err != nil {
+		t.Fatalf("failed to parse acl.json: %v", err)
+	}
+
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 ACL entry (idempotent), got %d", len(entries))
+	}
+	if len(entries[0].Permissions) != 3 {
+		t.Errorf("expected 3 permissions after update, got %d", len(entries[0].Permissions))
+	}
+}
+
+func TestClient_SyncDocument_PersistsToFile(t *testing.T) {
+	client, tmpDir := setupTestClientWithDir(t)
+	defer func() {
+		client.Close()
+		os.RemoveAll(tmpDir)
+	}()
+
+	ctx := context.Background()
+	spaceID := "space_doc_test"
+	docID := "doc_persist_123"
+	docData := []byte(`{"said":"ESAID123","issuer":"EORG"}`)
+
+	err := client.SyncDocument(ctx, spaceID, docID, docData)
+	if err != nil {
+		t.Fatalf("SyncDocument failed: %v", err)
+	}
+
+	// Read and verify the document file
+	docPath := filepath.Join(tmpDir, "spaces", spaceID, "documents", docID+".json")
+	data, err := os.ReadFile(docPath)
+	if err != nil {
+		t.Fatalf("failed to read document file: %v", err)
+	}
+
+	var doc localDocument
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("failed to parse document: %v", err)
+	}
+
+	if doc.DocID != docID {
+		t.Errorf("expected docID %s, got %s", docID, doc.DocID)
+	}
+	if doc.SpaceID != spaceID {
+		t.Errorf("expected spaceID %s, got %s", spaceID, doc.SpaceID)
+	}
+	if doc.SyncedAt == "" {
+		t.Error("expected non-empty SyncedAt")
+	}
+
+	// Verify data is valid JSON inside the document
+	var innerData map[string]interface{}
+	if err := json.Unmarshal(doc.Data, &innerData); err != nil {
+		t.Fatalf("failed to parse inner data: %v", err)
+	}
+	if innerData["said"] != "ESAID123" {
+		t.Errorf("expected said ESAID123, got %v", innerData["said"])
 	}
 }
 

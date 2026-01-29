@@ -9,15 +9,23 @@ import (
 	"github.com/anyproto/any-sync/util/crypto"
 )
 
+// syncDocCall records a call to SyncDocument
+type syncDocCall struct {
+	SpaceID string
+	DocID   string
+	Data    []byte
+}
+
 // mockAnySyncClient implements AnySyncClient for testing
 type mockAnySyncClient struct {
-	spaces         map[string]*SpaceCreateResult
-	createSpaceErr error
-	addToACLErr    error
-	syncDocErr     error
-	networkID      string
-	coordinatorURL string
-	peerID         string
+	spaces             map[string]*SpaceCreateResult
+	createSpaceErr     error
+	addToACLErr        error
+	syncDocErr         error
+	networkID          string
+	coordinatorURL     string
+	peerID             string
+	syncDocumentCalls  []syncDocCall
 }
 
 func newMockAnySyncClient() *mockAnySyncClient {
@@ -62,6 +70,7 @@ func (m *mockAnySyncClient) AddToACL(ctx context.Context, spaceID string, peerID
 }
 
 func (m *mockAnySyncClient) SyncDocument(ctx context.Context, spaceID string, docID string, data []byte) error {
+	m.syncDocumentCalls = append(m.syncDocumentCalls, syncDocCall{SpaceID: spaceID, DocID: docID, Data: data})
 	return m.syncDocErr
 }
 
@@ -572,6 +581,84 @@ func TestCredential_Fields(t *testing.T) {
 	}
 	if cred.Schema != "EMatouMembershipSchemaV1" {
 		t.Errorf("Schema mismatch")
+	}
+}
+
+func TestSpaceManager_AddToCommunitySpace_CallsSyncDocument(t *testing.T) {
+	mockClient := newMockAnySyncClient()
+	manager := NewSpaceManager(mockClient, &SpaceManagerConfig{
+		CommunitySpaceID: "community-space-123",
+		OrgAID:           "EORG123",
+	})
+
+	ctx := context.Background()
+	cred := &Credential{
+		SAID:      "ESAID_MEMBERSHIP_001",
+		Issuer:    "EORG123",
+		Recipient: "EUSER456",
+		Schema:    "EMatouMembershipSchemaV1",
+		Data:      map[string]interface{}{"role": "Member"},
+	}
+
+	err := manager.AddToCommunitySpace(ctx, cred)
+	if err != nil {
+		t.Fatalf("AddToCommunitySpace failed: %v", err)
+	}
+
+	if len(mockClient.syncDocumentCalls) != 1 {
+		t.Fatalf("expected 1 SyncDocument call, got %d", len(mockClient.syncDocumentCalls))
+	}
+
+	call := mockClient.syncDocumentCalls[0]
+	if call.SpaceID != "community-space-123" {
+		t.Errorf("expected spaceID community-space-123, got %s", call.SpaceID)
+	}
+	if call.DocID != "ESAID_MEMBERSHIP_001" {
+		t.Errorf("expected docID ESAID_MEMBERSHIP_001, got %s", call.DocID)
+	}
+	if len(call.Data) == 0 {
+		t.Error("expected non-empty data")
+	}
+}
+
+func TestSpaceManager_SyncToPrivateSpace_CallsSyncDocument(t *testing.T) {
+	mockClient := newMockAnySyncClient()
+	manager := NewSpaceManager(mockClient, &SpaceManagerConfig{
+		CommunitySpaceID: "community-space-123",
+		OrgAID:           "EORG123",
+	})
+
+	spaceStore := newMockSpaceStore()
+	ctx := context.Background()
+	userAID := "EUSER123456789"
+
+	cred := &Credential{
+		SAID:      "ESAID_PRIVATE_001",
+		Issuer:    "EORG123",
+		Recipient: userAID,
+		Schema:    "EMatouMembershipSchemaV1",
+		Data:      map[string]interface{}{"role": "Member"},
+	}
+
+	err := manager.SyncToPrivateSpace(ctx, userAID, cred, spaceStore)
+	if err != nil {
+		t.Fatalf("SyncToPrivateSpace failed: %v", err)
+	}
+
+	if len(mockClient.syncDocumentCalls) != 1 {
+		t.Fatalf("expected 1 SyncDocument call, got %d", len(mockClient.syncDocumentCalls))
+	}
+
+	call := mockClient.syncDocumentCalls[0]
+	// The spaceID should be the private space that was created
+	if call.SpaceID == "" {
+		t.Error("expected non-empty spaceID")
+	}
+	if call.DocID != "ESAID_PRIVATE_001" {
+		t.Errorf("expected docID ESAID_PRIVATE_001, got %s", call.DocID)
+	}
+	if len(call.Data) == 0 {
+		t.Error("expected non-empty data")
 	}
 }
 

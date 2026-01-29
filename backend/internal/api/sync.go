@@ -50,6 +50,7 @@ type SyncCredentialsResponse struct {
 	Failed         int      `json:"failed"`
 	PrivateSpace   string   `json:"privateSpace,omitempty"`
 	CommunitySpace string   `json:"communitySpace,omitempty"`
+	Spaces         []string `json:"spaces,omitempty"`
 	Errors         []string `json:"errors,omitempty"`
 }
 
@@ -131,6 +132,7 @@ func (h *SyncHandler) HandleSyncCredentials(w http.ResponseWriter, r *http.Reque
 	var errors []string
 	synced := 0
 	failed := 0
+	spaceSet := make(map[string]bool)
 
 	// Get or create user's private space
 	privateSpace, err := h.spaceManager.GetOrCreatePrivateSpace(ctx, req.UserAID, h.spaceStore)
@@ -176,13 +178,22 @@ func (h *SyncHandler) HandleSyncCredentials(w http.ResponseWriter, r *http.Reque
 			Data:      cred.Data,
 		}
 
-		_, routeErr := h.spaceManager.RouteCredential(ctx, anysyncCred, h.spaceStore)
+		routedSpaces, routeErr := h.spaceManager.RouteCredential(ctx, anysyncCred, h.spaceStore)
 		if routeErr != nil {
 			errors = append(errors, fmt.Sprintf("failed to route credential %s: %v", cred.SAID, routeErr))
 			// Don't fail - credential is cached even if routing fails
 		}
+		for _, sid := range routedSpaces {
+			spaceSet[sid] = true
+		}
 
 		synced++
+	}
+
+	// Collect unique space IDs
+	var spaces []string
+	for sid := range spaceSet {
+		spaces = append(spaces, sid)
 	}
 
 	// Build response
@@ -190,6 +201,7 @@ func (h *SyncHandler) HandleSyncCredentials(w http.ResponseWriter, r *http.Reque
 		Success: failed == 0,
 		Synced:  synced,
 		Failed:  failed,
+		Spaces:  spaces,
 		Errors:  errors,
 	}
 
