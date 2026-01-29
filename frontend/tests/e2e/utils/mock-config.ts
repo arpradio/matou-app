@@ -5,8 +5,9 @@
  * to all config server requests, making them use a separate test config file.
  */
 import { Page, BrowserContext, APIRequestContext } from '@playwright/test';
+import { keriEndpoints } from './keri-testnet';
 
-const CONFIG_SERVER_URL = 'http://localhost:3904';
+const CONFIG_SERVER_URL = keriEndpoints.configURL;
 
 /**
  * Setup test config isolation for a page or context
