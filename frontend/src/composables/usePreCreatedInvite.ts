@@ -78,17 +78,14 @@ export function usePreCreatedInvite() {
       progress.value = 'Establishing contact between agents...';
 
       // Get invitee OOBI and resolve on admin's agent
+      // OOBI resolution happens server-side (KERIA resolves via its Docker network),
+      // so we pass the raw OOBI URL without hostname normalization.
       const inviteeOobiResult = await inviteeClient.oobis().get(aidName, 'agent');
-      let inviteeOobi = inviteeOobiResult.oobis?.[0] || inviteeOobiResult.oobi;
+      const inviteeOobi = inviteeOobiResult.oobis?.[0] || inviteeOobiResult.oobi;
       if (!inviteeOobi) {
         throw new Error('Could not get invitee OOBI');
       }
-      console.log('[PreCreatedInvite] Raw invitee OOBI:', inviteeOobi);
-      // Normalize Docker-internal hostnames for browser access
-      const cesrUrl = import.meta.env.VITE_KERIA_CESR_URL || 'http://localhost:3902';
-      inviteeOobi = inviteeOobi.replace(/http:\/\/keria:\d+/, cesrUrl);
-      inviteeOobi = inviteeOobi.replace(/http:\/\/witness-demo:\d+/, cesrUrl);
-      console.log('[PreCreatedInvite] Normalized invitee OOBI:', inviteeOobi);
+      console.log('[PreCreatedInvite] Invitee OOBI:', inviteeOobi);
       const resolved = await adminClient.resolveOOBI(inviteeOobi, `invitee-${aidName}`, 30000);
       if (!resolved) {
         throw new Error('Failed to resolve invitee OOBI on admin agent');
@@ -101,17 +98,13 @@ export function usePreCreatedInvite() {
 
       // Find org AID name from admin's identifiers
       const adminAids = await adminSignifyClient.identifiers().list();
-      // The org AID is the group AID — find it or use the first AID's OOBI
-      let orgOobiUrl: string | null = null;
       for (const aid of adminAids.aids) {
         try {
           const oobiResult = await adminSignifyClient.oobis().get(aid.name, 'agent');
           const oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
           if (oobi) {
-            orgOobiUrl = oobi.replace(/http:\/\/keria:\d+/, cesrUrl);
-            orgOobiUrl = orgOobiUrl.replace(/http:\/\/witness-demo:\d+/, cesrUrl);
-            // Resolve on invitee's agent
-            const resolveOp = await inviteeClient.oobis().resolve(orgOobiUrl!, `admin-${aid.name}`);
+            // OOBI resolution is server-side — use raw URL
+            const resolveOp = await inviteeClient.oobis().resolve(oobi, `admin-${aid.name}`);
             await inviteeClient.operations().wait(resolveOp, { signal: AbortSignal.timeout(30000) });
             console.log(`[PreCreatedInvite] Invitee resolved admin OOBI for ${aid.name}`);
           }
