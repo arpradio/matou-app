@@ -83,11 +83,16 @@ export function usePreCreatedInvite() {
       if (!inviteeOobi) {
         throw new Error('Could not get invitee OOBI');
       }
-      // Normalize hostname for browser access
-      inviteeOobi = inviteeOobi.replace(/http:\/\/keria:(\d+)/, (_match: string, port: string) => {
-        return import.meta.env.VITE_KERIA_CESR_URL || `http://localhost:${port}`;
-      });
-      await adminClient.resolveOOBI(inviteeOobi, `invitee-${aidName}`);
+      console.log('[PreCreatedInvite] Raw invitee OOBI:', inviteeOobi);
+      // Normalize Docker-internal hostnames for browser access
+      const cesrUrl = import.meta.env.VITE_KERIA_CESR_URL || 'http://localhost:3902';
+      inviteeOobi = inviteeOobi.replace(/http:\/\/keria:\d+/, cesrUrl);
+      inviteeOobi = inviteeOobi.replace(/http:\/\/witness-demo:\d+/, cesrUrl);
+      console.log('[PreCreatedInvite] Normalized invitee OOBI:', inviteeOobi);
+      const resolved = await adminClient.resolveOOBI(inviteeOobi, `invitee-${aidName}`, 30000);
+      if (!resolved) {
+        throw new Error('Failed to resolve invitee OOBI on admin agent');
+      }
       console.log('[PreCreatedInvite] Admin resolved invitee OOBI');
 
       // Get admin/org OOBI and resolve on invitee's agent
@@ -103,9 +108,8 @@ export function usePreCreatedInvite() {
           const oobiResult = await adminSignifyClient.oobis().get(aid.name, 'agent');
           const oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
           if (oobi) {
-            orgOobiUrl = oobi.replace(/http:\/\/keria:(\d+)/, (_match: string, port: string) => {
-              return import.meta.env.VITE_KERIA_CESR_URL || `http://localhost:${port}`;
-            });
+            orgOobiUrl = oobi.replace(/http:\/\/keria:\d+/, cesrUrl);
+            orgOobiUrl = orgOobiUrl.replace(/http:\/\/witness-demo:\d+/, cesrUrl);
             // Resolve on invitee's agent
             const resolveOp = await inviteeClient.oobis().resolve(orgOobiUrl!, `admin-${aid.name}`);
             await inviteeClient.operations().wait(resolveOp, { signal: AbortSignal.timeout(30000) });
