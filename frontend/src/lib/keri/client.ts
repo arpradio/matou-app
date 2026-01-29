@@ -30,8 +30,9 @@ export class KERIClient {
 
   // KERIA endpoints - direct connection
   // CORS enabled via KERI_AGENT_CORS=1 environment variable
-  private readonly keriaUrl = 'http://localhost:3901';
-  private readonly keriaBootUrl = 'http://localhost:3903';
+  // Configurable via Vite env vars (VITE_KERIA_ADMIN_URL, VITE_KERIA_BOOT_URL)
+  private readonly keriaUrl = import.meta.env.VITE_KERIA_ADMIN_URL || 'http://localhost:3901';
+  private readonly keriaBootUrl = import.meta.env.VITE_KERIA_BOOT_URL || 'http://localhost:3903';
 
   /**
    * Initialize and connect to KERIA agent
@@ -253,8 +254,8 @@ export class KERIClient {
    * This is a well-known endpoint that users can resolve to contact the org
    */
   getOrgOOBI(): string {
-    // KERIA OOBI endpoint - port 3902 is the OOBI service
-    return `http://localhost:3902/oobi/${this.ORG_AID}`;
+    const cesrUrl = import.meta.env.VITE_KERIA_CESR_URL || 'http://localhost:3902';
+    return `${cesrUrl}/oobi/${this.ORG_AID}`;
   }
 
   /**
@@ -654,7 +655,10 @@ export class KERIClient {
     }
 
     // Normalize KERIA Docker hostname to localhost for browser access
-    oobi = oobi.replace(/http:\/\/keria:(\d+)/, 'http://localhost:$1');
+    oobi = oobi.replace(/http:\/\/keria:(\d+)/, (_, port) => {
+      const cesrUrl = import.meta.env.VITE_KERIA_CESR_URL || `http://localhost:${port}`;
+      return cesrUrl;
+    });
 
     console.log(`[KERIClient] OOBI: ${oobi}`);
     return oobi;

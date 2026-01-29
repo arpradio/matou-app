@@ -44,7 +44,7 @@ test.describe.serial('Organization Setup', () => {
       throw new Error(
         `KERI services not reachable: ${keriDown.join(', ')}\n` +
         'Start the KERI test infrastructure:\n' +
-        '  cd infrastructure/keri-test && make up',
+        '  cd infrastructure/keri && make up-test',
       );
     }
 

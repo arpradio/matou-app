@@ -2,7 +2,7 @@
  * KERI Test Network utilities for frontend E2E tests.
  *
  * Manages the KERI infrastructure lifecycle (KERIA, witnesses, schema server,
- * config server) via the infrastructure/keri-test/ Docker Compose setup.
+ * config server) via the infrastructure/keri/ Docker Compose setup (test targets).
  *
  * This is the TypeScript equivalent of the Go testnet packages:
  *   - backend/internal/keri/testnet/testnet.go
@@ -47,13 +47,13 @@ export const witnessAIDs = {
 } as const;
 
 /**
- * Resolve the absolute path to the infrastructure/keri-test/ directory.
+ * Resolve the absolute path to the infrastructure/keri/ directory.
  * Works regardless of the working directory by resolving relative to this file.
  */
 function getInfraPath(): string {
   // This file: frontend/tests/e2e/utils/keri-testnet.ts
-  // Target:    infrastructure/keri-test/
-  const infraPath = path.resolve(__dirname, '..', '..', '..', '..', 'infrastructure', 'keri-test');
+  // Target:    infrastructure/keri/
+  const infraPath = path.resolve(__dirname, '..', '..', '..', '..', 'infrastructure', 'keri');
 
   if (!fs.existsSync(infraPath)) {
     throw new Error(`KERI infrastructure not found at ${infraPath}`);
@@ -63,15 +63,17 @@ function getInfraPath(): string {
 }
 
 /**
- * Run a make target in the infrastructure/keri-test/ directory.
+ * Run a make target in the infrastructure/keri/ directory.
+ * Appends '-test' to the target name so it uses .env.test (test network ports).
  */
 function runMake(target: string, options?: { silent?: boolean; timeout?: number }): string {
   const infraPath = getInfraPath();
   const silent = options?.silent ? '-s' : '';
   const timeout = options?.timeout ?? 120_000;
+  const testTarget = `${target}-test`;
 
   try {
-    const result = execSync(`make ${silent} ${target}`.trim(), {
+    const result = execSync(`make ${silent} ${testTarget}`.trim(), {
       cwd: infraPath,
       timeout,
       encoding: 'utf-8',
@@ -218,9 +220,9 @@ export function requireKERINetwork(): void {
       'KERI test infrastructure is not running or not healthy.\n' +
       'This usually means the Docker containers are stopped.\n\n' +
       'Start the KERI test network:\n' +
-      '  cd infrastructure/keri-test && make up\n\n' +
+      '  cd infrastructure/keri && make up-test\n\n' +
       'Then wait for services to be ready:\n' +
-      '  make ready'
+      '  make ready-test'
     );
   }
 }
