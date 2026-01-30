@@ -51,7 +51,6 @@ export default defineConfig({
     {
       name: 'invitation',
       testMatch: /e2e-invitation\.spec\.ts/,
-      dependencies: ['org-setup'],
       use: browserConfig,
     },
     // Recovery & error handling - independent

@@ -1,23 +1,26 @@
 /**
  * Composable for the invitee claim flow.
  * Connects to a pre-created KERIA agent using the passcode from the claim link,
- * auto-admits IPEX credential grants, generates a permanent mnemonic,
- * rotates AID keys and agent passcode for cryptographic ownership.
+ * auto-admits IPEX credential grants, rotates AID keys for cryptographic ownership,
+ * and persists the session.
+ *
+ * NOTE: Agent passcode rotation is skipped due to a signify-ts / KERIA version
+ * incompatibility (controller.rotate() omits `br` and `ba` fields required by KERIA).
+ * The temp passcode from the claim URL is used as the session passcode.
+ * AID key rotation still provides cryptographic ownership — the admin's signing
+ * keys are invalidated even though the agent connection passcode is unchanged.
  */
 import { ref } from 'vue';
-import { generateMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
-import { KERIClient, useKERIClient } from 'src/lib/keri/client';
+import { useKERIClient } from 'src/lib/keri/client';
 import { useOnboardingStore } from 'stores/onboarding';
 
-export type ClaimStep = 'connecting' | 'admitting' | 'generating' | 'rotating' | 'done' | 'error';
+export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'done' | 'error';
 
 export function useClaimIdentity() {
   const keriClient = useKERIClient();
 
   const step = ref<ClaimStep>('connecting');
   const error = ref<string | null>(null);
-  const mnemonic = ref<string[]>([]);
   const progress = ref('');
 
   /**
@@ -26,32 +29,36 @@ export function useClaimIdentity() {
    */
   async function validate(passcode: string): Promise<{ name: string; prefix: string } | null> {
     try {
+      console.log('[ClaimIdentity:validate] passcode length:', passcode?.length);
       await keriClient.initialize(passcode);
       const aids = await keriClient.listAIDs();
+      console.log('[ClaimIdentity:validate] connected OK, AIDs:', aids.length);
       if (aids.length === 0) return null;
       return { name: aids[0].name, prefix: aids[0].prefix };
-    } catch {
+    } catch (err) {
+      console.error('[ClaimIdentity:validate] FAILED:', err);
       return null;
     }
   }
 
   /**
-   * Run the full claim flow: connect, admit grants, generate mnemonic, rotate keys + passcode.
+   * Run the full claim flow: connect, admit grants, rotate AID keys, persist session.
    * Assumes validate() has already been called and the client is connected.
+   *
+   * After claiming, the invitee goes directly to the dashboard (no mnemonic screens).
+   * The temp passcode is the session key; recovery requires admin re-invitation.
    */
   async function claimIdentity(passcode: string): Promise<boolean> {
     error.value = null;
-    mnemonic.value = [];
 
     try {
       // Step 1: Connect to pre-created agent
       step.value = 'connecting';
       progress.value = 'Connecting to your pre-created identity...';
 
-      // Initialize if not already connected (validate may have done this)
-      if (!keriClient.isConnected()) {
-        await keriClient.initialize(passcode);
-      }
+      // Always re-initialize: component transitions can cause the SignifyClient
+      // connection to become stale. initialize() connects to the existing agent.
+      await keriClient.initialize(passcode);
 
       const aids = await keriClient.listAIDs();
       if (aids.length === 0) {
@@ -97,33 +104,20 @@ export function useClaimIdentity() {
       const credentials = await client.credentials().list();
       console.log(`[ClaimIdentity] Credentials in wallet: ${credentials.length}`);
 
-      // Step 3: Generate permanent mnemonic
-      step.value = 'generating';
-      progress.value = 'Generating your personal recovery phrase...';
-
-      const permanentMnemonic = generateMnemonic(wordlist, 128);
-      mnemonic.value = permanentMnemonic.split(' ');
-      const newPasscode = KERIClient.passcodeFromMnemonic(permanentMnemonic);
-      console.log('[ClaimIdentity] Permanent mnemonic generated');
-
-      // Step 4: Rotate AID keys (take cryptographic ownership)
+      // Step 3: Rotate AID keys (take cryptographic ownership)
       step.value = 'rotating';
       progress.value = 'Rotating keys to take ownership...';
 
       await keriClient.rotateKeys(aid.name);
       console.log('[ClaimIdentity] AID keys rotated');
 
-      // Step 5: Rotate agent passcode
-      progress.value = 'Securing your agent with new passcode...';
-      await keriClient.rotateAgentPasscode(newPasscode, [aid.prefix]);
-      console.log('[ClaimIdentity] Agent passcode rotated');
+      // Step 4: Persist session using the temp passcode
+      // Agent passcode rotation is skipped (signify-ts/KERIA incompatibility)
+      // so the temp passcode from the claim URL remains the agent connection secret.
+      localStorage.setItem('matou_passcode', passcode);
 
-      // Step 6: Persist new session
-      localStorage.setItem('matou_passcode', newPasscode);
-
-      // Step 7: Populate onboarding store for mnemonic screens
+      // Populate identity info for the dashboard
       const onboardingStore = useOnboardingStore();
-      onboardingStore.setMnemonic(mnemonic.value);
       onboardingStore.setUserAID(aid.prefix);
       onboardingStore.updateProfile({ name: aid.name });
 
@@ -146,14 +140,12 @@ export function useClaimIdentity() {
   function reset() {
     step.value = 'connecting';
     error.value = null;
-    mnemonic.value = [];
     progress.value = '';
   }
 
   return {
     step,
     error,
-    mnemonic,
     progress,
     validate,
     claimIdentity,

@@ -98,22 +98,23 @@ export default boot(async ({ router }) => {
     keriClient.setOrgAID(appStore.orgAid);
   }
 
-  // Check if this is a claim route — bypass normal session restore
-  const currentRoute = router.currentRoute.value;
-  if (currentRoute.path.startsWith('/claim/')) {
-    const passcode = currentRoute.params.passcode as string;
-    if (passcode) {
-      console.log('[KERI Boot] Claim route detected, initializing claim flow');
-      if (localStorage.getItem('matou_passcode')) {
-        console.warn('[KERI Boot] Existing session found — claim will overwrite it');
-      }
-      onboardingStore.setPath('claim');
-      onboardingStore.setClaimPasscode(passcode);
-      onboardingStore.navigateTo('claim-welcome');
-      onboardingStore.setAppState('ready');
-      identityStore.setInitialized();
-      return;
+  // Check if this is a claim route — bypass normal session restore.
+  // Use window.location.hash directly because router.currentRoute.value
+  // hasn't resolved yet at boot time (it's still '/').
+  const hash = window.location.hash; // e.g. '#/claim/ABCDEFGHIJKLMNOPQRSTU'
+  const claimMatch = hash.match(/^#\/claim\/(.+)$/);
+  if (claimMatch) {
+    const passcode = claimMatch[1];
+    console.log('[KERI Boot] Claim route detected, initializing claim flow');
+    if (localStorage.getItem('matou_passcode')) {
+      console.warn('[KERI Boot] Existing session found — claim will overwrite it');
     }
+    onboardingStore.setPath('claim');
+    onboardingStore.setClaimPasscode(passcode);
+    onboardingStore.navigateTo('claim-welcome');
+    onboardingStore.setAppState('ready');
+    identityStore.setInitialized();
+    return;
   }
 
   // Step 2: Check for saved user session

@@ -315,14 +315,23 @@ export class KERIClient {
    * Rotate the agent passcode (bran) and reconnect.
    * After rotation the old SignifyClient connection is stale, so we
    * re-create and reconnect with the new passcode.
+   *
+   * Fetches all AID objects internally because signify-ts requires
+   * full AID records (with salty/randy key management info) for re-encryption.
+   *
    * @param newBran - The new passcode (21-character base64 string)
-   * @param aidPrefixes - Array of AID prefixes managed by this agent
    */
-  async rotateAgentPasscode(newBran: string, aidPrefixes: string[]): Promise<void> {
+  async rotateAgentPasscode(newBran: string): Promise<void> {
     if (!this.client) throw new Error('Not initialized');
 
     console.log('[KERIClient] Rotating agent passcode...');
-    await this.client.rotate(newBran, aidPrefixes);
+    // Fetch full AID objects via get() — list() returns simplified records
+    // that may lack `state` and `salty`/`randy` fields required by controller.rotate()
+    const listResult = await this.client.identifiers().list();
+    const aids = await Promise.all(
+      listResult.aids.map((a: { name: string }) => this.client!.identifiers().get(a.name))
+    );
+    await this.client.rotate(newBran, aids);
     console.log('[KERIClient] Passcode rotated, reconnecting with new passcode...');
 
     // Old connection is stale — re-create and reconnect

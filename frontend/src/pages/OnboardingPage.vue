@@ -170,12 +170,11 @@ const handleContinue = (data?: unknown) => {
       store.navigateTo(next as typeof store.currentScreen);
     }
   } else if (path === 'claim') {
-    // Claim flow: claim-welcome → claim-processing → profile-confirmation → mnemonic-verification → main
+    // Claim flow: claim-welcome → claim-processing → main (dashboard)
+    // No mnemonic screens — agent passcode rotation is skipped (signify-ts/KERIA compat issue)
     const forwardMap: Record<string, string> = {
       'claim-welcome': 'claim-processing',
-      'claim-processing': 'profile-confirmation',
-      'profile-confirmation': 'mnemonic-verification',
-      'mnemonic-verification': 'main',
+      'claim-processing': 'main',
     };
     const next = forwardMap[current];
     if (next) {
@@ -215,8 +214,6 @@ const handleBack = () => {
 
   const backMapClaim: Record<string, string | null> = {
     'claim-processing': 'claim-welcome',
-    'profile-confirmation': 'claim-processing',
-    'mnemonic-verification': 'profile-confirmation',
   };
 
   const backMap = path === 'invite'

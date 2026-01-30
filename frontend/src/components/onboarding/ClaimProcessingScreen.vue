@@ -15,7 +15,7 @@
         <div class="steps-container bg-card border border-border rounded-xl p-6">
           <div class="space-y-4">
             <div
-              v-for="(s, index) in steps"
+              v-for="s in steps"
               :key="s.key"
               class="step-item flex items-start gap-3"
             >
@@ -90,7 +90,7 @@
             <div>
               <h4 class="text-sm font-medium mb-1">Identity Claimed!</h4>
               <p class="text-sm text-muted-foreground">
-                Your identity has been secured with new keys. Continue to save your recovery phrase.
+                Your identity has been secured with new keys. You can now access the dashboard.
               </p>
             </div>
           </div>
@@ -107,7 +107,7 @@
           @click="handleContinue"
         >
           <template v-if="claimStep === 'done'">
-            Continue to Recovery Phrase
+            Continue to Dashboard
             <ArrowRight class="w-4 h-4 ml-2" />
           </template>
           <template v-else>
@@ -141,12 +141,11 @@ const emit = defineEmits<{
 const store = useOnboardingStore();
 const { step: claimStep, error: claimError, progress, claimIdentity, reset } = useClaimIdentity();
 
-const stepOrder: ClaimStep[] = ['connecting', 'admitting', 'generating', 'rotating', 'done'];
+const stepOrder: ClaimStep[] = ['connecting', 'admitting', 'rotating', 'done'];
 
 const steps = [
   { key: 'connecting' as ClaimStep, label: 'Connecting to agent' },
   { key: 'admitting' as ClaimStep, label: 'Accepting credential grants' },
-  { key: 'generating' as ClaimStep, label: 'Generating recovery phrase' },
   { key: 'rotating' as ClaimStep, label: 'Rotating keys for security' },
   { key: 'done' as ClaimStep, label: 'Claim complete' },
 ];
@@ -163,6 +162,7 @@ function isStepActive(key: ClaimStep): boolean {
 
 onMounted(async () => {
   const passcode = store.claimPasscode;
+  console.log('[ClaimProcessing] store.claimPasscode length:', passcode?.length);
   if (!passcode) {
     claimStep.value = 'error';
     claimError.value = 'No passcode available. Please use a valid claim link.';
