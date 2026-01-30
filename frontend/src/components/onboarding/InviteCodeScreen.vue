@@ -91,14 +91,15 @@ const handleSubmit = async () => {
   try {
     const result = await validate(code);
     if (result) {
-      store.setClaimPasscode(code);
+      store.setClaimPasscode(result.passcode);
+      store.setMnemonic(result.mnemonic);
       store.setClaimAidInfo(result);
       emit('continue');
     } else {
-      error.value = 'Invalid invite code. Please check and try again.';
+      error.value = 'Invalid or already used invite code. Please check and try again.';
     }
   } catch (err) {
-    error.value = 'Invalid invite code. Please check and try again.';
+    error.value = 'Invalid or already used invite code. Please check and try again.';
   } finally {
     isValidating.value = false;
   }

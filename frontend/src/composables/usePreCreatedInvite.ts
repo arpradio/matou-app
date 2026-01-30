@@ -171,11 +171,15 @@ export function usePreCreatedInvite() {
       );
       console.log('[PreCreatedInvite] Credential issued and IPEX grant sent');
 
-      // Step 7: Generate invite code
+      // Step 7: Generate invite code (encode mnemonic entropy as base64url)
+      // The invite code encodes the mnemonic, NOT the raw passcode.
+      // This allows the invitee to recover their identity using the mnemonic
+      // derived from the invite code, since the agent was booted with
+      // passcodeFromMnemonic(mnemonic) — matching the standard recovery flow.
       progress.value = 'Generating invite code...';
 
       result.value = {
-        inviteCode: tempPasscode,
+        inviteCode: KERIClient.inviteCodeFromMnemonic(tempMnemonic),
         inviteeAid: inviteeAid.prefix,
       };
 

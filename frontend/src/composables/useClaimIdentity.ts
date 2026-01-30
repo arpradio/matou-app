@@ -1,16 +1,21 @@
 /**
  * Composable for the invitee claim flow.
- * Connects to a pre-created KERIA agent using the passcode from the claim link,
+ * Connects to a pre-created KERIA agent using the invite code (encoded mnemonic),
  * auto-admits IPEX credential grants, rotates AID keys for cryptographic ownership,
- * generates a recovery mnemonic, rotates the agent passcode, and persists the session.
+ * and persists the session. The recovery mnemonic is derived from the invite code.
  */
 import { ref } from 'vue';
-import { generateMnemonic } from '@scure/bip39';
-import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { useKERIClient, KERIClient } from 'src/lib/keri/client';
 import { useOnboardingStore } from 'stores/onboarding';
 
 export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'securing' | 'done' | 'error';
+
+export interface ValidateResult {
+  name: string;
+  prefix: string;
+  passcode: string;
+  mnemonic: string[];
+}
 
 export function useClaimIdentity() {
   const keriClient = useKERIClient();
@@ -20,17 +25,43 @@ export function useClaimIdentity() {
   const progress = ref('');
 
   /**
-   * Validate that the passcode connects to a valid pre-created agent
-   * @returns AID name and prefix if valid, null otherwise
+   * Validate an invite code: decode mnemonic, derive passcode, connect to KERIA,
+   * and check the pre-created agent is valid and unclaimed.
+   * @returns AID info, derived passcode, and mnemonic if valid; null otherwise
    */
-  async function validate(passcode: string): Promise<{ name: string; prefix: string } | null> {
+  async function validate(inviteCode: string): Promise<ValidateResult | null> {
     try {
-      console.log('[ClaimIdentity:validate] passcode length:', passcode?.length);
+      console.log('[ClaimIdentity:validate] invite code length:', inviteCode?.length);
+
+      // Decode invite code → mnemonic → passcode
+      const mnemonic = KERIClient.mnemonicFromInviteCode(inviteCode);
+      const passcode = KERIClient.passcodeFromMnemonic(mnemonic);
+
       await keriClient.initialize(passcode);
       const aids = await keriClient.listAIDs();
       console.log('[ClaimIdentity:validate] connected OK, AIDs:', aids.length);
       if (aids.length === 0) return null;
-      return { name: aids[0].name, prefix: aids[0].prefix };
+
+      // Check if already claimed: AID key rotation (s > 0) means claimed.
+      // Use identifiers().get() for the full HabState with reliable key state.
+      const aid = aids[0];
+      const client = keriClient.getSignifyClient();
+      if (client) {
+        const habState = await client.identifiers().get(aid.name);
+        const sn = parseInt(String(habState?.state?.s ?? '0'), 16);
+        console.log('[ClaimIdentity:validate] AID key state s =', sn, 'raw =', habState?.state?.s);
+        if (sn > 0) {
+          console.log('[ClaimIdentity:validate] AID already claimed');
+          return null;
+        }
+      }
+
+      return {
+        name: aid.name,
+        prefix: aid.prefix,
+        passcode,
+        mnemonic: mnemonic.split(' '),
+      };
     } catch (err) {
       console.error('[ClaimIdentity:validate] FAILED:', err);
       return null;
@@ -39,7 +70,8 @@ export function useClaimIdentity() {
 
   /**
    * Run the full claim flow: connect, admit grants, rotate AID keys,
-   * generate recovery mnemonic, rotate agent passcode, and persist session.
+   * and persist session. The recovery mnemonic was already derived during
+   * validate() and stored in the onboarding store.
    * Assumes validate() has already been called and the client is connected.
    */
   async function claimIdentity(passcode: string): Promise<boolean> {
@@ -111,30 +143,18 @@ export function useClaimIdentity() {
       const credentials = await client.credentials().list();
       console.log(`[ClaimIdentity] Credentials in wallet: ${credentials.length}`);
 
-      // Step 3: Generate recovery mnemonic and rotate agent passcode
-      step.value = 'securing';
-      progress.value = 'Generating recovery phrase...';
-
-      const mnemonic = generateMnemonic(wordlist, 128); // 12 words
-      const mnemonicWords = mnemonic.split(' ');
-      const newPasscode = KERIClient.passcodeFromMnemonic(mnemonic);
-
-      progress.value = 'Rotating agent passcode...';
-      await keriClient.rotateAgentPasscode(newPasscode);
-      console.log('[ClaimIdentity] Agent passcode rotated');
-
-      // Step 4: Rotate AID keys (take cryptographic ownership)
+      // Step 3: Rotate AID keys (take cryptographic ownership)
+      // The agent passcode is NOT rotated — the invite code encodes the mnemonic
+      // that derives the boot passcode, so recovery can reconnect to the same agent.
+      // AID key rotation provides cryptographic ownership and marks the invite as claimed.
       step.value = 'rotating';
       progress.value = 'Rotating keys to take ownership...';
 
       await keriClient.rotateKeys(aid.name);
       console.log('[ClaimIdentity] AID keys rotated');
 
-      // Store mnemonic for the confirmation/verification screens
-      onboardingStore.setMnemonic(mnemonicWords);
-
-      // Persist session with the NEW passcode (old invite code is now invalid)
-      localStorage.setItem('matou_passcode', newPasscode);
+      // Persist session (same passcode — no agent rotation)
+      localStorage.setItem('matou_passcode', passcode);
 
       // Populate identity info for the dashboard
       onboardingStore.setUserAID(aid.prefix);

@@ -3,7 +3,7 @@
  * Connects to KERIA agent for AID management
  */
 import { SignifyClient, Tier, randomPasscode, ready, Salter } from 'signify-ts';
-import { mnemonicToSeedSync, validateMnemonic } from '@scure/bip39';
+import { mnemonicToSeedSync, mnemonicToEntropy, entropyToMnemonic, validateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 
 export interface AIDInfo {
@@ -822,6 +822,32 @@ export class KERIClient {
    */
   static validateMnemonic(mnemonic: string): boolean {
     return validateMnemonic(mnemonic, wordlist);
+  }
+
+  /**
+   * Encode a BIP39 mnemonic as a compact invite code (base64url of entropy).
+   * The invite code encodes the mnemonic's 128-bit entropy as a 22-character
+   * URL-safe string. The mnemonic can be recovered via mnemonicFromInviteCode().
+   * @param mnemonic - 12-word BIP39 mnemonic phrase
+   * @returns 22-character base64url invite code
+   */
+  static inviteCodeFromMnemonic(mnemonic: string): string {
+    const entropy = mnemonicToEntropy(mnemonic, wordlist); // Uint8Array(16)
+    const binString = String.fromCharCode(...entropy);
+    return btoa(binString).replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+  }
+
+  /**
+   * Decode an invite code back to a BIP39 mnemonic.
+   * Reverse of inviteCodeFromMnemonic().
+   * @param inviteCode - 22-character base64url invite code
+   * @returns 12-word BIP39 mnemonic phrase
+   */
+  static mnemonicFromInviteCode(inviteCode: string): string {
+    const padded = inviteCode.replace(/-/g, '+').replace(/_/g, '/');
+    const binString = atob(padded);
+    const entropy = new Uint8Array([...binString].map(c => c.charCodeAt(0)));
+    return entropyToMnemonic(entropy, wordlist);
   }
 
   /**

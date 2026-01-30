@@ -28,6 +28,7 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
   let adminContext: BrowserContext;
   let adminPage: Page;
   let inviteCode: string;
+  let claimedMnemonic: string[];
 
   test.beforeAll(async ({ browser, request }) => {
     // Create persistent admin context with test config isolation
@@ -232,6 +233,7 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
         const text = await wordCards.nth(i).locator('.font-mono').textContent();
         mnemonicWords.push(text!.trim());
       }
+      claimedMnemonic = mnemonicWords;
       console.log(`[Test] Captured ${mnemonicWords.length} mnemonic words`);
 
       // Check the "I have written down..." checkbox
@@ -270,12 +272,14 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       await expect(inviteePage).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.long });
       console.log('[Test] PASS - Invitee on dashboard after claiming identity');
 
-      // --- Verify session persisted with NEW passcode (not the invite code) ---
+      // --- Verify session persisted with passcode derived from the mnemonic ---
+      // The invite code is base64url-encoded mnemonic entropy, NOT the raw passcode.
+      // The stored passcode is derived from the mnemonic via PBKDF2.
       const storedPasscode = await inviteePage.evaluate(() => {
         return localStorage.getItem('matou_passcode');
       });
       expect(storedPasscode, 'Passcode should be persisted in localStorage').toBeTruthy();
-      expect(storedPasscode, 'Stored passcode should differ from invite code (agent passcode was rotated)').not.toBe(inviteCode);
+      expect(storedPasscode, 'Stored passcode should differ from invite code (invite code encodes mnemonic, not passcode)').not.toBe(inviteCode);
     } finally {
       await inviteeContext.close();
     }
@@ -312,14 +316,59 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       await codeInput.fill(inviteCode);
       await freshPage.getByRole('button', { name: /continue/i }).click();
 
-      // Should show error — the passcode was rotated so the old one won't connect
-      console.log('[Test] Waiting for invalid invite code error...');
+      // Should show error — the AID keys were rotated during claim, so
+      // validate() detects key state s > 0 and rejects the invite code.
+      console.log('[Test] Waiting for invalid/already-used invite code error...');
       await expect(
-        freshPage.getByText(/invalid|already been used|failed/i).first(),
+        freshPage.getByText(/invalid|already.used|failed/i).first(),
       ).toBeVisible({ timeout: TIMEOUT.long });
       console.log('[Test] PASS - Old invite code correctly rejected');
     } finally {
       await freshContext.close();
+    }
+  });
+
+  // ------------------------------------------------------------------
+  // Test 4: Invitee recovers identity with mnemonic
+  // ------------------------------------------------------------------
+  test('invitee recovers identity with mnemonic', async ({ browser }) => {
+    test.setTimeout(TIMEOUT.orgSetup);
+
+    expect(claimedMnemonic, 'Mnemonic must exist from test 2').toBeTruthy();
+    expect(claimedMnemonic).toHaveLength(12);
+
+    // Fresh browser context — no existing session
+    const recoveryContext = await browser.newContext();
+    await setupTestConfig(recoveryContext);
+    const recoveryPage = await recoveryContext.newPage();
+    setupPageLogging(recoveryPage, 'Recovery');
+
+    try {
+      // Clear any existing session
+      await recoveryPage.goto(FRONTEND_URL);
+      await recoveryPage.evaluate(() => localStorage.clear());
+      await recoveryPage.goto(FRONTEND_URL);
+      await recoveryPage.waitForLoadState('networkidle');
+
+      // Use the existing loginWithMnemonic helper
+      await loginWithMnemonic(recoveryPage, claimedMnemonic);
+
+      // Verify on dashboard
+      console.log('[Test] Recovery: on dashboard, checking credential...');
+
+      // Verify membership card is visible with credential status
+      const membershipCard = recoveryPage.locator('.membership-card');
+      await expect(membershipCard).toBeVisible({ timeout: TIMEOUT.long });
+
+      // Check "Verified" badge and "Credential Active" subtitle
+      await expect(membershipCard.locator('.verified-badge'))
+        .toHaveText('Verified', { timeout: TIMEOUT.short });
+      await expect(membershipCard.locator('.membership-subtitle'))
+        .toHaveText('Credential Active', { timeout: TIMEOUT.short });
+
+      console.log('[Test] PASS - Identity recovered, credential still active');
+    } finally {
+      await recoveryContext.close();
     }
   });
 });
