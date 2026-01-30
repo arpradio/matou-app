@@ -34,17 +34,6 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
-  {
-    path: '/claim/:passcode',
-    name: 'claim',
-    component: () => import('layouts/OnboardingLayout.vue'),
-    children: [
-      {
-        path: '',
-        component: () => import('pages/OnboardingPage.vue'),
-      },
-    ],
-  },
   // Always leave this as last one
   {
     path: '/:catchAll(.*)*',

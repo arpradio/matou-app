@@ -15,7 +15,7 @@ export interface InviteConfig {
 }
 
 export interface InviteResult {
-  claimUrl: string;
+  inviteCode: string;
   inviteeAid: string;
 }
 
@@ -171,17 +171,16 @@ export function usePreCreatedInvite() {
       );
       console.log('[PreCreatedInvite] Credential issued and IPEX grant sent');
 
-      // Step 7: Generate claim URL
-      progress.value = 'Generating invitation link...';
-      const claimUrl = `${window.location.origin}/#/claim/${tempPasscode}`;
+      // Step 7: Generate invite code
+      progress.value = 'Generating invite code...';
 
       result.value = {
-        claimUrl,
+        inviteCode: tempPasscode,
         inviteeAid: inviteeAid.prefix,
       };
 
       progress.value = 'Invitation created!';
-      console.log('[PreCreatedInvite] Invite complete:', claimUrl);
+      console.log('[PreCreatedInvite] Invite complete, code generated');
 
       return true;
     } catch (err) {

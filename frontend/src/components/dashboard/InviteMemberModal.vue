@@ -71,10 +71,10 @@
           </div>
 
           <div>
-            <label class="block text-sm font-medium mb-1.5">Claim Link</label>
+            <label class="block text-sm font-medium mb-1.5">Invite Code</label>
             <div class="flex gap-2">
               <input
-                :value="result.claimUrl"
+                :value="result.inviteCode"
                 type="text"
                 readonly
                 class="flex-1 px-3 py-2.5 bg-secondary/50 border border-border rounded-lg text-xs font-mono focus:outline-none"
@@ -87,7 +87,7 @@
               </button>
             </div>
             <p class="text-xs text-muted-foreground mt-1.5">
-              Share this link with {{ inviteeName }}. It can only be used once.
+              Share this code with {{ inviteeName }}. It can only be used once.
             </p>
           </div>
 
@@ -181,7 +181,7 @@ function handleCreateAnother() {
 
 function copyLink() {
   if (!result.value) return;
-  navigator.clipboard.writeText(result.value.claimUrl);
+  navigator.clipboard.writeText(result.value.inviteCode);
   copied.value = true;
   setTimeout(() => {
     copied.value = false;

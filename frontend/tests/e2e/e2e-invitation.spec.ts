@@ -15,8 +15,8 @@ import {
  *
  * Tests the full invitation lifecycle:
  * 1. Admin creates a pre-configured invitation from the dashboard
- * 2. Invitee opens the claim link and claims their identity
- * 3. Invitee completes mnemonic verification and reaches the dashboard
+ * 2. Invitee enters invite code on splash, goes through welcome + profile + processing
+ * 3. Invitee reaches the dashboard
  *
  * Self-sufficient: if org-setup hasn't been run yet, performs it automatically.
  *
@@ -27,7 +27,7 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
   let accounts: TestAccounts;
   let adminContext: BrowserContext;
   let adminPage: Page;
-  let claimUrl: string;
+  let inviteCode: string;
 
   test.beforeAll(async ({ browser, request }) => {
     // Create persistent admin context with test config isolation
@@ -103,17 +103,18 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
     console.log('[Test] Creating invitation (this involves KERI operations)...');
     await modal.getByRole('button', { name: /create invitation/i }).click();
 
-    // Wait for progress to appear, then for claim URL to appear
+    // Wait for progress to appear, then for invite code to appear
     await expect(modal.locator('.progress-box')).toBeVisible({ timeout: TIMEOUT.short });
 
-    // Wait for success — claim URL input appears
-    const claimUrlInput = modal.locator('input[readonly]');
-    await expect(claimUrlInput).toBeVisible({ timeout: TIMEOUT.orgSetup });
+    // Wait for success — invite code input appears
+    const inviteCodeInput = modal.locator('input[readonly]');
+    await expect(inviteCodeInput).toBeVisible({ timeout: TIMEOUT.orgSetup });
 
-    // Extract claim URL
-    claimUrl = await claimUrlInput.inputValue();
-    console.log(`[Test] Claim URL generated: ${claimUrl}`);
-    expect(claimUrl).toContain('/#/claim/');
+    // Extract invite code
+    inviteCode = await inviteCodeInput.inputValue();
+    console.log(`[Test] Invite code generated (length: ${inviteCode.length})`);
+    expect(inviteCode).toBeTruthy();
+    expect(inviteCode.length).toBeGreaterThan(10);
 
     // Verify invitee AID is shown
     const aidInfo = modal.locator('.aid-info code');
@@ -129,16 +130,12 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
   });
 
   // ------------------------------------------------------------------
-  // Test 2: Invitee claims identity via claim link
+  // Test 2: Invitee claims identity via invite code flow
   // ------------------------------------------------------------------
-  test('invitee claims identity via claim link', async ({ browser }) => {
+  test('invitee claims identity via invite code', async ({ browser }) => {
     test.setTimeout(TIMEOUT.orgSetup); // 2 min — AID key rotation + OOBI resolution
 
-    expect(claimUrl, 'Claim URL must exist from previous test').toBeTruthy();
-
-    // Extract the hash path from the claim URL
-    const hashPath = new URL(claimUrl).hash; // e.g., #/claim/ABCDEFGHIJKLMNOPQRSTU
-    console.log(`[Test] Opening claim link: ${hashPath}`);
+    expect(inviteCode, 'Invite code must exist from previous test').toBeTruthy();
 
     // Create fresh browser context for the invitee (no existing session)
     const inviteeContext = await browser.newContext();
@@ -147,20 +144,31 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
     setupPageLogging(inviteePage, 'Invitee');
 
     try {
-      // Clear any existing session
+      // Clear any existing session and navigate to splash
       await inviteePage.goto(FRONTEND_URL);
       await inviteePage.evaluate(() => localStorage.clear());
-
-      // Navigate to claim URL
-      await inviteePage.goto(`${FRONTEND_URL}/${hashPath}`);
+      await inviteePage.goto(FRONTEND_URL);
       await inviteePage.waitForLoadState('networkidle');
+
+      // --- Splash Screen: Click "I have an invite code" ---
+      console.log('[Test] On splash screen, clicking invite code button...');
+      const inviteCodeBtn = inviteePage.locator('button', { hasText: /invite code/i });
+      await expect(inviteCodeBtn).toBeVisible({ timeout: TIMEOUT.long });
+      await inviteCodeBtn.click();
+
+      // --- Invite Code Screen: Paste the raw passcode ---
+      console.log('[Test] Pasting invite code...');
+      const codeInput = inviteePage.locator('#inviteCode input');
+      await expect(codeInput).toBeVisible({ timeout: TIMEOUT.short });
+      await codeInput.fill(inviteCode);
+
+      // Click Continue to validate against KERIA
+      await inviteePage.getByRole('button', { name: /continue/i }).click();
 
       // --- Claim Welcome Screen ---
       console.log('[Test] Waiting for claim welcome screen...');
-
-      // Wait for validation to complete (loading spinner disappears, content appears)
       await expect(
-        inviteePage.getByRole('heading', { name: /your identity is ready/i }),
+        inviteePage.getByRole('heading', { name: /welcome/i }),
       ).toBeVisible({ timeout: TIMEOUT.long });
 
       // Verify identity preview is shown
@@ -168,20 +176,35 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       await expect(identityCard).toBeVisible({ timeout: TIMEOUT.short });
       console.log('[Test] Claim welcome screen loaded with identity preview');
 
-      // Click "Claim My Identity"
-      await inviteePage.getByRole('button', { name: /claim my identity/i }).click();
+      // Click "I agree, accept invitation"
+      await inviteePage.getByRole('button', { name: /I agree, accept invitation/i }).click();
+
+      // --- Profile Form Screen ---
+      console.log('[Test] Filling in profile form...');
+      await expect(
+        inviteePage.getByRole('heading', { name: /claim your profile/i }),
+      ).toBeVisible({ timeout: TIMEOUT.short });
+
+      // Fill in display name
+      await inviteePage.locator('#name input').fill('Test Invitee');
+
+      // Agree to terms
+      const termsCheckbox = inviteePage.locator('input[type="checkbox"]').last();
+      await termsCheckbox.check();
+
+      // Submit profile form
+      await inviteePage.getByRole('button', { name: /continue/i }).click();
 
       // --- Claim Processing Screen ---
       console.log('[Test] Claim processing started...');
 
-      // Wait for processing to complete — "Identity Claimed!" heading in the success box
+      // Wait for processing to complete — "Invitation Claimed!" in the success box
       await expect(
-        inviteePage.getByRole('heading', { name: /identity claimed/i }),
+        inviteePage.getByRole('heading', { name: /invitation claimed/i }),
       ).toBeVisible({ timeout: TIMEOUT.orgSetup });
-      console.log('[Test] Identity claimed successfully');
+      console.log('[Test] Invitation claimed successfully');
 
-      // Click "Continue to Dashboard" — claim flow skips mnemonic screens
-      // (agent passcode rotation not available due to signify-ts/KERIA compat issue)
+      // Click "Continue to Dashboard"
       await inviteePage.getByRole('button', { name: /continue to dashboard/i }).click();
 
       // --- Should navigate to dashboard ---
@@ -203,18 +226,16 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
   // Test 3: Old claim link no longer works after claiming
   // SKIPPED: Agent passcode rotation is not available due to signify-ts/KERIA
   // version incompatibility (controller.rotate() omits `br`/`ba` fields).
-  // Without passcode rotation, the old claim link still connects to the agent.
-  // AID key rotation provides cryptographic ownership but doesn't invalidate the link.
+  // Without passcode rotation, the old invite code still connects to the agent.
+  // AID key rotation provides cryptographic ownership but doesn't invalidate the code.
   // Re-enable when signify-ts agent passcode rotation is fixed.
   // ------------------------------------------------------------------
-  test.skip('claimed link is invalid after use', async ({ browser }) => {
+  test.skip('claimed invite code is invalid after use', async ({ browser }) => {
     test.setTimeout(TIMEOUT.long);
 
-    expect(claimUrl, 'Claim URL must exist from previous test').toBeTruthy();
+    expect(inviteCode, 'Invite code must exist from previous test').toBeTruthy();
 
-    const hashPath = new URL(claimUrl).hash;
-
-    // Open claim link in a fresh context
+    // Open splash in a fresh context
     const freshContext = await browser.newContext();
     await setupTestConfig(freshContext);
     const freshPage = await freshContext.newPage();
@@ -223,15 +244,26 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
     try {
       await freshPage.goto(FRONTEND_URL);
       await freshPage.evaluate(() => localStorage.clear());
-      await freshPage.goto(`${FRONTEND_URL}/${hashPath}`);
+      await freshPage.goto(FRONTEND_URL);
       await freshPage.waitForLoadState('networkidle');
 
+      // Click "I have an invite code"
+      const inviteCodeBtn = freshPage.locator('button', { hasText: /invite code/i });
+      await expect(inviteCodeBtn).toBeVisible({ timeout: TIMEOUT.long });
+      await inviteCodeBtn.click();
+
+      // Paste the already-used invite code
+      const codeInput = freshPage.locator('#inviteCode input');
+      await expect(codeInput).toBeVisible({ timeout: TIMEOUT.short });
+      await codeInput.fill(inviteCode);
+      await freshPage.getByRole('button', { name: /continue/i }).click();
+
       // Should show error — the passcode was rotated so the old one won't connect
-      console.log('[Test] Waiting for invalid claim link error...');
+      console.log('[Test] Waiting for invalid invite code error...');
       await expect(
         freshPage.getByText(/invalid|already been used|failed/i).first(),
       ).toBeVisible({ timeout: TIMEOUT.long });
-      console.log('[Test] PASS - Old claim link correctly rejected');
+      console.log('[Test] PASS - Old invite code correctly rejected');
     } finally {
       await freshContext.close();
     }

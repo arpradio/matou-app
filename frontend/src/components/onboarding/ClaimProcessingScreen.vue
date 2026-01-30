@@ -88,7 +88,7 @@
           <div class="flex items-start gap-3">
             <CheckCircle2 class="w-5 h-5 text-accent shrink-0 mt-0.5" />
             <div>
-              <h4 class="text-sm font-medium mb-1">Identity Claimed!</h4>
+              <h4 class="text-sm font-medium mb-1">Invitation Claimed!</h4>
               <p class="text-sm text-muted-foreground">
                 Your identity has been secured with new keys. You can now access the dashboard.
               </p>

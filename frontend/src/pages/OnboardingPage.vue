@@ -85,8 +85,8 @@ const currentProps = computed(() => {
         onApproved: handleApproved,
         onContinueToDashboard: handleContinueToDashboard,
       };
-    case 'claim-welcome':
-      return { passcode: store.claimPasscode || '' };
+    case 'profile-form':
+      return store.onboardingPath === 'claim' ? { isClaim: true } : {};
     default:
       return {};
   }
@@ -103,7 +103,7 @@ const handleContinueToDashboard = () => {
 
 // Navigation handlers
 const startInviteFlow = () => {
-  store.setPath('invite');
+  store.setPath('claim');
   store.navigateTo('invite-code');
 };
 
@@ -121,29 +121,11 @@ const handleContinue = (data?: unknown) => {
   const current = currentScreen.value;
   const path = store.onboardingPath;
 
-  // Handle data passed from screens
-  if (current === 'invite-code' && typeof data === 'string') {
-    store.setInviterName(data);
-  }
-
   // Note: ProfileConfirmationScreen already sets mnemonic and AID in the store before emitting
   // So we don't need to handle the data here - just navigate to next screen
 
   // Navigate to next screen based on path
-  // Flow: profile-form → profile-confirmation (includes mnemonic) → mnemonic-verification → credential-issuance/pending-approval
-  if (path === 'invite') {
-    const forwardMap: Record<string, string> = {
-      'invite-code': 'invitation-welcome',
-      'invitation-welcome': 'profile-form',
-      'profile-form': 'profile-confirmation',
-      'profile-confirmation': 'mnemonic-verification',
-      'mnemonic-verification': 'credential-issuance',
-    };
-    const next = forwardMap[current];
-    if (next) {
-      store.navigateTo(next as typeof store.currentScreen);
-    }
-  } else if (path === 'register') {
+  if (path === 'register') {
     const forwardMap: Record<string, string> = {
       'matou-info': 'profile-form',
       'profile-form': 'profile-confirmation',
@@ -170,10 +152,11 @@ const handleContinue = (data?: unknown) => {
       store.navigateTo(next as typeof store.currentScreen);
     }
   } else if (path === 'claim') {
-    // Claim flow: claim-welcome → claim-processing → main (dashboard)
-    // No mnemonic screens — agent passcode rotation is skipped (signify-ts/KERIA compat issue)
+    // Claim flow: invite-code → claim-welcome → profile-form → claim-processing → main
     const forwardMap: Record<string, string> = {
-      'claim-welcome': 'claim-processing',
+      'invite-code': 'claim-welcome',
+      'claim-welcome': 'profile-form',
+      'profile-form': 'claim-processing',
       'claim-processing': 'main',
     };
     const next = forwardMap[current];
@@ -188,14 +171,6 @@ const handleBack = () => {
   const path = store.onboardingPath;
 
   // Define back navigation based on current path
-  const backMapInvite: Record<string, string | null> = {
-    'invite-code': 'splash',
-    'invitation-welcome': 'invite-code',
-    'profile-form': 'invitation-welcome',
-    'profile-confirmation': 'profile-form',
-    'mnemonic-verification': 'profile-confirmation',
-  };
-
   const backMapRegister: Record<string, string | null> = {
     'matou-info': 'splash',
     'profile-form': 'matou-info',
@@ -213,18 +188,18 @@ const handleBack = () => {
   };
 
   const backMapClaim: Record<string, string | null> = {
-    'claim-processing': 'claim-welcome',
+    'invite-code': 'splash',
+    'claim-welcome': 'invite-code',
+    'profile-form': 'claim-welcome',
   };
 
-  const backMap = path === 'invite'
-    ? backMapInvite
-    : path === 'recover'
-      ? backMapRecover
-      : path === 'setup'
-        ? backMapSetup
-        : path === 'claim'
-          ? backMapClaim
-          : backMapRegister;
+  const backMap = path === 'recover'
+    ? backMapRecover
+    : path === 'setup'
+      ? backMapSetup
+      : path === 'claim'
+        ? backMapClaim
+        : backMapRegister;
   const prev = backMap[current];
 
   if (prev === 'splash') {

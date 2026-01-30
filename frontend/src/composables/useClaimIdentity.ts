@@ -119,7 +119,9 @@ export function useClaimIdentity() {
       // Populate identity info for the dashboard
       const onboardingStore = useOnboardingStore();
       onboardingStore.setUserAID(aid.prefix);
-      onboardingStore.updateProfile({ name: aid.name });
+      if (!onboardingStore.profile.name) {
+        onboardingStore.updateProfile({ name: aid.name });
+      }
 
       // Done
       step.value = 'done';
