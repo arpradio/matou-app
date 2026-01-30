@@ -54,6 +54,7 @@ type SDKClient struct {
 	networkID       string
 	coordinatorURL  string
 	initialized     bool
+	spaceCache      sync.Map // spaceID → commonspace.Space
 }
 
 // NewSDKClient creates a new any-sync client with full network connectivity
@@ -192,20 +193,17 @@ func (c *SDKClient) initFullSDK() error {
 	return nil
 }
 
-// CreateSpace creates a new space and registers it with the coordinator
+// CreateSpace creates a new space and registers it with the coordinator.
+// This generates a SpaceKeySet internally. For explicit key control, use
+// CreateSpaceWithKeys instead.
 func (c *SDKClient) CreateSpace(ctx context.Context, ownerAID string, spaceType string, signingKey crypto.PrivKey) (*SpaceCreateResult, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	if !c.initialized {
-		return nil, fmt.Errorf("client not initialized")
-	}
-
 	if signingKey == nil {
+		c.mu.RLock()
 		signingKey = c.peerKeyManager.GetPrivKey()
+		c.mu.RUnlock()
 	}
 
-	// Create keys for the space
+	// Build a SpaceKeySet
 	masterKey, _, err := crypto.GenerateRandomEd25519KeyPair()
 	if err != nil {
 		return nil, fmt.Errorf("generating master key: %w", err)
@@ -221,35 +219,82 @@ func (c *SDKClient) CreateSpace(ctx context.Context, ownerAID string, spaceType 
 		return nil, fmt.Errorf("generating metadata key: %w", err)
 	}
 
-	// Create space payload
+	keys := &SpaceKeySet{
+		SigningKey:   signingKey,
+		MasterKey:    masterKey,
+		ReadKey:      readKey,
+		MetadataKey:  metadataKey,
+	}
+
+	return c.CreateSpaceWithKeys(ctx, ownerAID, spaceType, keys)
+}
+
+// CreateSpaceWithKeys creates a new space using a full SpaceKeySet and registers
+// it with the coordinator. Keys are persisted and the space is cached.
+func (c *SDKClient) CreateSpaceWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *SpaceKeySet) (*SpaceCreateResult, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if !c.initialized {
+		return nil, fmt.Errorf("client not initialized")
+	}
+
+	// Compute replication key using FNV-64
+	repKey, err := ComputeReplicationKey(keys.SigningKey)
+	if err != nil {
+		return nil, fmt.Errorf("computing replication key: %w", err)
+	}
+
 	metadata := []byte(fmt.Sprintf(`{"owner":"%s","type":"%s","created":"%s"}`,
 		ownerAID, spaceType, time.Now().UTC().Format(time.RFC3339)))
 
 	payload := spacepayloads.SpaceCreatePayload{
-		SigningKey:     signingKey,
-		MasterKey:      masterKey,
+		SigningKey:     keys.SigningKey,
+		MasterKey:      keys.MasterKey,
 		SpaceType:      spaceType,
-		ReplicationKey: generateReplicationKey(signingKey),
+		ReplicationKey: repKey,
 		SpacePayload:   []byte(ownerAID),
-		ReadKey:        readKey,
-		MetadataKey:    metadataKey,
+		ReadKey:        keys.ReadKey,
+		MetadataKey:    keys.MetadataKey,
 		Metadata:       metadata,
 	}
 
-	// Create space via the space service (this registers with coordinator)
+	// Create space via the space service (handles coordinator registration)
 	spaceID, err := c.spaceService.CreateSpace(ctx, payload)
 	if err != nil {
 		return nil, fmt.Errorf("creating space: %w", err)
 	}
 
-	fmt.Printf("[any-sync SDK] Created space: %s (type: %s)\n", spaceID[:20]+"...", spaceType)
+	// Persist keys
+	if err := PersistSpaceKeySet(c.dataDir, spaceID, keys); err != nil {
+		return nil, fmt.Errorf("persisting space keys: %w", err)
+	}
+
+	fmt.Printf("[any-sync SDK] Created space with keys: %s (type: %s)\n", spaceID[:20]+"...", spaceType)
 
 	return &SpaceCreateResult{
 		SpaceID:   spaceID,
 		CreatedAt: time.Now().UTC(),
 		OwnerAID:  ownerAID,
 		SpaceType: spaceType,
+		Keys:      keys,
 	}, nil
+}
+
+// GetSpace returns an opened Space by ID. If not cached, it attempts to open
+// the space via the space service.
+func (c *SDKClient) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	// Check cache first
+	if cached, ok := c.spaceCache.Load(spaceID); ok {
+		return cached.(commonspace.Space), nil
+	}
+
+	return nil, fmt.Errorf("space %s not found in cache; create it first via CreateSpaceWithKeys", spaceID)
+}
+
+// GetDataDir returns the data directory path
+func (c *SDKClient) GetDataDir() string {
+	return c.dataDir
 }
 
 // DeriveSpace creates a deterministic space derived from the signing key
@@ -701,7 +746,10 @@ func (p *sdkStorageProvider) SpaceExists(id string) bool {
 	return ok
 }
 
-// sdkPeerManagerProvider implements peermanager.PeerManagerProvider
+// sdkPeerManagerProvider implements peermanager.PeerManagerProvider.
+// TODO(Stage 6): Replace with the SDK's built-in peer manager from
+// commonspace.New() internal components. Current stub returns empty peers,
+// preventing real HeadUpdate broadcasts and P2P sync.
 type sdkPeerManagerProvider struct{}
 
 func newSDKPeerManagerProvider() *sdkPeerManagerProvider { return &sdkPeerManagerProvider{} }
@@ -725,7 +773,9 @@ func (m *sdkPeerManager) SendMessage(ctx context.Context, peerId string, msg drp
 }
 func (m *sdkPeerManager) KeepAlive(ctx context.Context) {}
 
-// sdkTreeManager implements treemanager.TreeManager
+// sdkTreeManager implements treemanager.TreeManager.
+// TODO(Stage 6): Replace with objecttreebuilder.New() as the tree manager component.
+// Current stub returns "not found" for all operations, preventing tree sync.
 type sdkTreeManager struct{}
 
 func newSDKTreeManager() *sdkTreeManager { return &sdkTreeManager{} }
@@ -747,7 +797,10 @@ func (t *sdkTreeManager) DeleteTree(ctx context.Context, spaceId, treeId string)
 	return nil
 }
 
-// sdkStreamHandler implements streamhandler.StreamHandler
+// sdkStreamHandler implements streamhandler.StreamHandler.
+// TODO(Stage 6): Replace with the SDK's default stream handler or register
+// proper message handlers for TreeSyncContentValue messages. Current stub
+// returns errors for all stream operations, preventing P2P communication.
 type sdkStreamHandler struct{}
 
 func newSDKStreamHandler() *sdkStreamHandler { return &sdkStreamHandler{} }

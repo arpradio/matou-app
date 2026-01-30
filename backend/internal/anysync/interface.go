@@ -5,6 +5,8 @@ package anysync
 import (
 	"context"
 
+	"github.com/anyproto/any-sync/commonspace"
+	"github.com/anyproto/any-sync/commonspace/object/acl/list"
 	"github.com/anyproto/any-sync/util/crypto"
 )
 
@@ -13,6 +15,15 @@ import (
 type AnySyncClient interface {
 	// CreateSpace creates a new space
 	CreateSpace(ctx context.Context, ownerAID string, spaceType string, signingKey crypto.PrivKey) (*SpaceCreateResult, error)
+
+	// CreateSpaceWithKeys creates a new space using a full SpaceKeySet.
+	// This is the preferred method for creating spaces with proper
+	// cryptographic key management.
+	CreateSpaceWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *SpaceKeySet) (*SpaceCreateResult, error)
+
+	// GetSpace returns an opened Space by ID. The space must have been
+	// previously created via CreateSpace or CreateSpaceWithKeys.
+	GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error)
 
 	// DeriveSpace creates a deterministic space
 	DeriveSpace(ctx context.Context, ownerAID string, spaceType string, signingKey crypto.PrivKey) (*SpaceCreateResult, error)
@@ -35,9 +46,28 @@ type AnySyncClient interface {
 	// GetPeerID returns the client's peer ID
 	GetPeerID() string
 
+	// GetDataDir returns the data directory path
+	GetDataDir() string
+
 	// Ping tests connectivity to the any-sync network
 	Ping() error
 
 	// Close shuts down the client
 	Close() error
+}
+
+// InviteManager manages ACL invitations for any-sync spaces using the SDK's
+// AclRecordBuilder. It supports open invite codes (encrypted read key) and
+// join-without-approval flows.
+type InviteManager interface {
+	// CreateOpenInvite creates an "anyone can join" invite code for a space.
+	// Returns the invite private key which should be shared out-of-band.
+	CreateOpenInvite(ctx context.Context, spaceID string, permissions list.AclPermissions) (crypto.PrivKey, error)
+
+	// JoinWithInvite joins a space using an invite key obtained out-of-band.
+	// The invite key decrypts the space's read key from the invite record.
+	JoinWithInvite(ctx context.Context, spaceID string, inviteKey crypto.PrivKey, metadata []byte) error
+
+	// GetPermissions returns a user's permissions in a space.
+	GetPermissions(ctx context.Context, spaceID string, identity crypto.PubKey) (list.AclPermissions, error)
 }

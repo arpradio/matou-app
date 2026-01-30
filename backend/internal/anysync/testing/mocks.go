@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anyproto/any-sync/commonspace"
 	"github.com/anyproto/any-sync/util/crypto"
 	"github.com/matou-dao/backend/internal/anysync"
 )
@@ -30,26 +31,39 @@ type MockAnySyncClient struct {
 	PeerID         string
 	Initialized    bool
 
+	// Data directory for tests
+	DataDir string
+
 	// Error injection
-	CreateSpaceError    error
-	DeriveSpaceError    error
-	DeriveSpaceIDError  error
-	AddToACLError       error
-	SyncDocumentError   error
-	CloseError          error
+	CreateSpaceError         error
+	CreateSpaceWithKeysError error
+	GetSpaceError            error
+	DeriveSpaceError         error
+	DeriveSpaceIDError       error
+	AddToACLError            error
+	SyncDocumentError        error
+	CloseError               error
 
 	// Call tracking
-	CreateSpaceCalls    []CreateSpaceCall
-	DeriveSpaceCalls    []DeriveSpaceCall
-	AddToACLCalls       []AddToACLCall
-	SyncDocumentCalls   []SyncDocumentCall
+	CreateSpaceCalls         []CreateSpaceCall
+	CreateSpaceWithKeysCalls []CreateSpaceWithKeysCall
+	DeriveSpaceCalls         []DeriveSpaceCall
+	AddToACLCalls            []AddToACLCall
+	SyncDocumentCalls        []SyncDocumentCall
 }
 
 // CreateSpaceCall records a call to CreateSpace
 type CreateSpaceCall struct {
-	OwnerAID   string
-	SpaceType  string
+	OwnerAID  string
+	SpaceType string
 	SigningKey crypto.PrivKey
+}
+
+// CreateSpaceWithKeysCall records a call to CreateSpaceWithKeys
+type CreateSpaceWithKeysCall struct {
+	OwnerAID  string
+	SpaceType string
+	Keys      *anysync.SpaceKeySet
 }
 
 // DeriveSpaceCall records a call to DeriveSpace
@@ -261,6 +275,60 @@ func (m *MockAnySyncClient) Close() error {
 	return nil
 }
 
+// CreateSpaceWithKeys implements AnySyncClient.CreateSpaceWithKeys
+func (m *MockAnySyncClient) CreateSpaceWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *anysync.SpaceKeySet) (*anysync.SpaceCreateResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.CreateSpaceWithKeysCalls = append(m.CreateSpaceWithKeysCalls, CreateSpaceWithKeysCall{
+		OwnerAID:  ownerAID,
+		SpaceType: spaceType,
+		Keys:      keys,
+	})
+
+	if m.CreateSpaceWithKeysError != nil {
+		return nil, m.CreateSpaceWithKeysError
+	}
+
+	spaceID := fmt.Sprintf("space_%s_%s", spaceType, ownerAID[:8])
+
+	if existing, ok := m.Spaces[spaceID]; ok {
+		return existing, nil
+	}
+
+	result := &anysync.SpaceCreateResult{
+		SpaceID:   spaceID,
+		CreatedAt: time.Now().UTC(),
+		OwnerAID:  ownerAID,
+		SpaceType: spaceType,
+		Keys:      keys,
+	}
+
+	m.Spaces[spaceID] = result
+	m.ACLEntries[spaceID] = []ACLEntry{}
+	m.Documents[spaceID] = make(map[string][]byte)
+
+	return result, nil
+}
+
+// GetSpace implements AnySyncClient.GetSpace
+func (m *MockAnySyncClient) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	if m.GetSpaceError != nil {
+		return nil, m.GetSpaceError
+	}
+
+	// Mock doesn't return real spaces
+	return nil, fmt.Errorf("mock: space %s not available as commonspace.Space", spaceID)
+}
+
+// GetDataDir implements AnySyncClient.GetDataDir
+func (m *MockAnySyncClient) GetDataDir() string {
+	return m.DataDir
+}
+
 // Reset clears all recorded calls and state
 func (m *MockAnySyncClient) Reset() {
 	m.mu.Lock()
@@ -270,10 +338,13 @@ func (m *MockAnySyncClient) Reset() {
 	m.ACLEntries = make(map[string][]ACLEntry)
 	m.Documents = make(map[string]map[string][]byte)
 	m.CreateSpaceCalls = nil
+	m.CreateSpaceWithKeysCalls = nil
 	m.DeriveSpaceCalls = nil
 	m.AddToACLCalls = nil
 	m.SyncDocumentCalls = nil
 	m.CreateSpaceError = nil
+	m.CreateSpaceWithKeysError = nil
+	m.GetSpaceError = nil
 	m.DeriveSpaceError = nil
 	m.AddToACLError = nil
 	m.SyncDocumentError = nil

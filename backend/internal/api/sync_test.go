@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anyproto/any-sync/commonspace"
 	"github.com/anyproto/any-sync/util/crypto"
 	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/anystore"
@@ -66,8 +67,17 @@ func (m *mockSyncAnySyncClient) SyncDocument(ctx context.Context, spaceID string
 func (m *mockSyncAnySyncClient) GetNetworkID() string      { return "test-network" }
 func (m *mockSyncAnySyncClient) GetCoordinatorURL() string { return "http://localhost:1004" }
 func (m *mockSyncAnySyncClient) GetPeerID() string         { return "test-peer-123" }
+func (m *mockSyncAnySyncClient) GetDataDir() string        { return "" }
 func (m *mockSyncAnySyncClient) Ping() error               { return nil }
 func (m *mockSyncAnySyncClient) Close() error              { return nil }
+
+func (m *mockSyncAnySyncClient) CreateSpaceWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *anysync.SpaceKeySet) (*anysync.SpaceCreateResult, error) {
+	return m.CreateSpace(ctx, ownerAID, spaceType, nil)
+}
+
+func (m *mockSyncAnySyncClient) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	return nil, fmt.Errorf("mock: GetSpace not supported")
+}
 
 func setupSyncTestHandler(t *testing.T) (*SyncHandler, *anystore.LocalStore, func()) {
 	// Create temp directory for test database

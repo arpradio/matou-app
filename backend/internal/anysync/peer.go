@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 
@@ -167,6 +168,18 @@ func DeriveKeyForAID(mnemonic string, aid string) (crypto.PrivKey, error) {
 	}
 
 	return privKey, nil
+}
+
+// ComputeReplicationKey computes a replication key from a signing key using
+// FNV-64 hash, matching the any-sync SDK's algorithm for space-to-node assignment.
+func ComputeReplicationKey(signingKey crypto.PrivKey) (uint64, error) {
+	raw, err := signingKey.GetPublic().Raw()
+	if err != nil {
+		return 0, fmt.Errorf("getting public key bytes: %w", err)
+	}
+	h := fnv.New64()
+	h.Write(raw)
+	return h.Sum64(), nil
 }
 
 // AIDMapping represents a stored AID-to-PeerID mapping

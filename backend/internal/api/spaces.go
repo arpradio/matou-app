@@ -113,7 +113,7 @@ func (h *SpacesHandler) HandleCreateCommunity(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	// Create new community space via any-sync client
+	// Create new community space via any-sync client using full key set
 	ctx := r.Context()
 	client := h.spaceManager.GetClient()
 	if client == nil {
@@ -124,7 +124,16 @@ func (h *SpacesHandler) HandleCreateCommunity(w http.ResponseWriter, r *http.Req
 		return
 	}
 
-	result, err := client.CreateSpace(ctx, req.OrgAID, anysync.SpaceTypeCommunity, nil)
+	keys, err := anysync.GenerateSpaceKeySet()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, CreateCommunityResponse{
+			Success: false,
+			Error:   fmt.Sprintf("failed to generate space keys: %v", err),
+		})
+		return
+	}
+
+	result, err := client.CreateSpaceWithKeys(ctx, req.OrgAID, anysync.SpaceTypeCommunity, keys)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, CreateCommunityResponse{
 			Success: false,

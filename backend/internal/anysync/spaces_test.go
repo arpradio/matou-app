@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anyproto/any-sync/commonspace"
 	"github.com/anyproto/any-sync/util/crypto"
 )
 
@@ -77,8 +78,17 @@ func (m *mockAnySyncClient) SyncDocument(ctx context.Context, spaceID string, do
 func (m *mockAnySyncClient) GetNetworkID() string      { return m.networkID }
 func (m *mockAnySyncClient) GetCoordinatorURL() string { return m.coordinatorURL }
 func (m *mockAnySyncClient) GetPeerID() string         { return m.peerID }
+func (m *mockAnySyncClient) GetDataDir() string        { return "" }
 func (m *mockAnySyncClient) Ping() error               { return nil }
 func (m *mockAnySyncClient) Close() error              { return nil }
+
+func (m *mockAnySyncClient) CreateSpaceWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *SpaceKeySet) (*SpaceCreateResult, error) {
+	return m.CreateSpace(ctx, ownerAID, spaceType, nil)
+}
+
+func (m *mockAnySyncClient) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	return nil, fmt.Errorf("mock: GetSpace not supported")
+}
 
 // mockSpaceStore implements SpaceStore for testing
 type mockSpaceStore struct {

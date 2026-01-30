@@ -30,6 +30,8 @@ type Space struct {
 // SpaceManager manages any-sync spaces for MATOU
 type SpaceManager struct {
 	client           AnySyncClient
+	aclManager       *MatouACLManager
+	credTreeManager  *CredentialTreeManager
 	communitySpaceID string
 	orgAID           string
 }
@@ -44,9 +46,21 @@ type SpaceManagerConfig struct {
 func NewSpaceManager(client AnySyncClient, cfg *SpaceManagerConfig) *SpaceManager {
 	return &SpaceManager{
 		client:           client,
+		aclManager:       NewMatouACLManager(client, nil),
+		credTreeManager:  NewCredentialTreeManager(client, nil),
 		communitySpaceID: cfg.CommunitySpaceID,
 		orgAID:           cfg.OrgAID,
 	}
+}
+
+// ACLManager returns the SDK-backed ACL manager for invite/join operations.
+func (m *SpaceManager) ACLManager() *MatouACLManager {
+	return m.aclManager
+}
+
+// CredentialTreeManager returns the credential tree manager.
+func (m *SpaceManager) CredentialTreeManager() *CredentialTreeManager {
+	return m.credTreeManager
 }
 
 // generatePrivateSpaceID generates a deterministic space ID for a user
@@ -174,8 +188,8 @@ func IsCommunityVisible(cred *Credential) bool {
 	}
 }
 
-// AddToCommunitySpace adds a credential to the community space
-// Only community-visible credentials should be added
+// AddToCommunitySpace adds a credential to the community space.
+// Uses CredentialTreeManager when available, falls back to SyncDocument.
 func (m *SpaceManager) AddToCommunitySpace(ctx context.Context, cred *Credential) error {
 	if !IsCommunityVisible(cred) {
 		return fmt.Errorf("credential schema %s is not community-visible", cred.Schema)
@@ -185,15 +199,11 @@ func (m *SpaceManager) AddToCommunitySpace(ctx context.Context, cred *Credential
 		return fmt.Errorf("community space ID not configured")
 	}
 
-	data, err := json.Marshal(cred)
-	if err != nil {
-		return fmt.Errorf("marshaling credential for community space: %w", err)
-	}
-
-	return m.client.SyncDocument(ctx, m.communitySpaceID, cred.SAID, data)
+	return m.addCredToSpace(ctx, m.communitySpaceID, cred)
 }
 
-// SyncToPrivateSpace syncs a credential to a user's private space
+// SyncToPrivateSpace syncs a credential to a user's private space.
+// Uses CredentialTreeManager when available, falls back to SyncDocument.
 func (m *SpaceManager) SyncToPrivateSpace(ctx context.Context, userAID string, cred *Credential, spaceStore SpaceStore) error {
 	// Get or create the user's private space
 	space, err := m.GetOrCreatePrivateSpace(ctx, userAID, spaceStore)
@@ -201,12 +211,47 @@ func (m *SpaceManager) SyncToPrivateSpace(ctx context.Context, userAID string, c
 		return fmt.Errorf("getting private space: %w", err)
 	}
 
-	data, err := json.Marshal(cred)
-	if err != nil {
-		return fmt.Errorf("marshaling credential for private space: %w", err)
+	return m.addCredToSpace(ctx, space.SpaceID, cred)
+}
+
+// addCredToSpace adds a credential to a space using CredentialTreeManager if
+// the space is available via GetSpace (SDK mode), otherwise falls back to SyncDocument.
+func (m *SpaceManager) addCredToSpace(ctx context.Context, spaceID string, cred *Credential) error {
+	// Try CredentialTreeManager path (requires real SDK space)
+	if m.credTreeManager != nil {
+		_, err := m.client.GetSpace(ctx, spaceID)
+		if err == nil {
+			// Space is available — use tree manager
+			payload := &CredentialPayload{
+				SAID:      cred.SAID,
+				Issuer:    cred.Issuer,
+				Recipient: cred.Recipient,
+				Schema:    cred.Schema,
+				Timestamp: time.Now().Unix(),
+			}
+			if cred.Data != nil {
+				dataBytes, err := json.Marshal(cred.Data)
+				if err == nil {
+					payload.Data = dataBytes
+				}
+			}
+
+			// Use the space's signing key if available
+			keys, loadErr := LoadSpaceKeySet(m.client.GetDataDir(), spaceID)
+			if loadErr == nil && keys.SigningKey != nil {
+				_, addErr := m.credTreeManager.AddCredential(ctx, spaceID, payload, keys.SigningKey)
+				return addErr
+			}
+		}
 	}
 
-	return m.client.SyncDocument(ctx, space.SpaceID, cred.SAID, data)
+	// Fallback: use SyncDocument
+	data, err := json.Marshal(cred)
+	if err != nil {
+		return fmt.Errorf("marshaling credential: %w", err)
+	}
+
+	return m.client.SyncDocument(ctx, spaceID, cred.SAID, data)
 }
 
 // RouteCredential determines where a credential should be stored and syncs it

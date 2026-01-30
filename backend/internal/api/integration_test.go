@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anyproto/any-sync/commonspace"
 	"github.com/anyproto/any-sync/util/crypto"
 	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/anystore"
@@ -63,8 +64,17 @@ func (m *mockAnySyncClientForIntegration) SyncDocument(ctx context.Context, spac
 func (m *mockAnySyncClientForIntegration) GetNetworkID() string      { return "test-network" }
 func (m *mockAnySyncClientForIntegration) GetCoordinatorURL() string { return "http://localhost:1004" }
 func (m *mockAnySyncClientForIntegration) GetPeerID() string         { return "test-peer-123" }
+func (m *mockAnySyncClientForIntegration) GetDataDir() string        { return "" }
 func (m *mockAnySyncClientForIntegration) Ping() error               { return nil }
 func (m *mockAnySyncClientForIntegration) Close() error              { return nil }
+
+func (m *mockAnySyncClientForIntegration) CreateSpaceWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *anysync.SpaceKeySet) (*anysync.SpaceCreateResult, error) {
+	return m.CreateSpace(ctx, ownerAID, spaceType, nil)
+}
+
+func (m *mockAnySyncClientForIntegration) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	return nil, fmt.Errorf("mock: GetSpace not supported")
+}
 
 // IntegrationTestEnv provides a complete test environment for integration testing
 type IntegrationTestEnv struct {

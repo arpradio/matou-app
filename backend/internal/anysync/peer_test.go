@@ -1,9 +1,12 @@
 package anysync
 
 import (
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anyproto/any-sync/util/crypto"
 )
 
 func TestDeriveKeyFromMnemonic_Valid(t *testing.T) {
@@ -326,6 +329,54 @@ func TestPeerKeyManager_GetPeerInfo(t *testing.T) {
 
 	if info.PublicKey == "" {
 		t.Error("expected non-empty public key in info")
+	}
+}
+
+func TestComputeReplicationKey(t *testing.T) {
+	// Generate a key
+	privKey, _, err := crypto.GenerateRandomEd25519KeyPair()
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+
+	repKey, err := ComputeReplicationKey(privKey)
+	if err != nil {
+		t.Fatalf("ComputeReplicationKey failed: %v", err)
+	}
+
+	if repKey == 0 {
+		t.Error("expected non-zero replication key")
+	}
+
+	// Verify it matches FNV-64 of the public key bytes
+	pubBytes, _ := privKey.GetPublic().Raw()
+	h := fnv.New64()
+	h.Write(pubBytes)
+	expected := h.Sum64()
+
+	if repKey != expected {
+		t.Errorf("replication key mismatch: got %d, want %d", repKey, expected)
+	}
+
+	// Same key should produce same replication key
+	repKey2, err := ComputeReplicationKey(privKey)
+	if err != nil {
+		t.Fatalf("second ComputeReplicationKey failed: %v", err)
+	}
+	if repKey != repKey2 {
+		t.Errorf("replication key should be deterministic: %d != %d", repKey, repKey2)
+	}
+}
+
+func TestComputeReplicationKey_DifferentKeys(t *testing.T) {
+	key1, _, _ := crypto.GenerateRandomEd25519KeyPair()
+	key2, _, _ := crypto.GenerateRandomEd25519KeyPair()
+
+	rep1, _ := ComputeReplicationKey(key1)
+	rep2, _ := ComputeReplicationKey(key2)
+
+	if rep1 == rep2 {
+		t.Error("different keys should (very likely) produce different replication keys")
 	}
 }
 

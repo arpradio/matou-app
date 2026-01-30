@@ -160,14 +160,14 @@ func TestClient_CreateSpace_Community(t *testing.T) {
 	}
 }
 
-func TestClient_CreateSpace_Idempotent(t *testing.T) {
+func TestClient_CreateSpace_UniqueIDs(t *testing.T) {
 	client, cleanup := setupTestClient(t)
 	defer cleanup()
 
 	ctx := context.Background()
 	ownerAID := "EOwner1234567890abcdef"
 
-	// Create space twice
+	// Creating spaces with random keys produces unique CID-based IDs
 	result1, err := client.CreateSpace(ctx, ownerAID, SpaceTypePrivate, nil)
 	if err != nil {
 		t.Fatalf("first create failed: %v", err)
@@ -178,9 +178,14 @@ func TestClient_CreateSpace_Idempotent(t *testing.T) {
 		t.Fatalf("second create failed: %v", err)
 	}
 
-	// Should return the same space ID
-	if result1.SpaceID != result2.SpaceID {
-		t.Errorf("expected same space ID, got %s and %s", result1.SpaceID, result2.SpaceID)
+	// Each call generates fresh keys → distinct CID-based space IDs
+	if result1.SpaceID == result2.SpaceID {
+		t.Error("expected different CID-based space IDs from independent key generation")
+	}
+
+	// Both should be non-empty
+	if result1.SpaceID == "" || result2.SpaceID == "" {
+		t.Error("expected non-empty space IDs")
 	}
 }
 

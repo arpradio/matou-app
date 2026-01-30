@@ -19,6 +19,7 @@ import (
 	"github.com/anyproto/any-sync/commonspace/credentialprovider"
 	"github.com/anyproto/any-sync/commonspace/object/accountdata"
 	"github.com/anyproto/any-sync/commonspace/peermanager"
+	"github.com/anyproto/any-sync/commonspace/spacepayloads"
 	"github.com/anyproto/any-sync/commonspace/spacestorage"
 	"github.com/anyproto/any-sync/consensus/consensusproto"
 	"github.com/anyproto/any-sync/coordinator/coordinatorclient"
@@ -39,17 +40,18 @@ import (
 
 // Client provides access to any-sync infrastructure using the full SDK
 type Client struct {
-	mu             sync.RWMutex
-	app            *app.App
-	config         *ClientConfig
-	spaceService   commonspace.SpaceService
-	accountService accountservice.Service
+	mu              sync.RWMutex
+	app             *app.App
+	config          *ClientConfig
+	spaceService    commonspace.SpaceService
+	accountService  accountservice.Service
 	storageProvider spacestorage.SpaceStorageProvider
-	peerKeyManager *PeerKeyManager
-	dataDir        string
-	networkID      string
-	coordinatorURL string
-	initialized    bool
+	peerKeyManager  *PeerKeyManager
+	dataDir         string
+	networkID       string
+	coordinatorURL  string
+	initialized     bool
+	spaceCache      sync.Map // spaceID → true (tracks created spaces)
 }
 
 // ClientConfig represents the any-sync client.yml structure
@@ -244,19 +246,94 @@ func findCoordinatorURL(nodes []Node) string {
 
 // SpaceCreateResult contains the result of space creation
 type SpaceCreateResult struct {
-	SpaceID   string    `json:"spaceId"`
-	CreatedAt time.Time `json:"createdAt"`
-	OwnerAID  string    `json:"ownerAid"`
-	SpaceType string    `json:"spaceType"`
+	SpaceID   string        `json:"spaceId"`
+	CreatedAt time.Time     `json:"createdAt"`
+	OwnerAID  string        `json:"ownerAid"`
+	SpaceType string        `json:"spaceType"`
+	Keys      *SpaceKeySet  `json:"-"` // In-memory only, not serialized
 }
 
-// CreateSpace creates a new space
-// In local mode, this generates a deterministic space ID and stores metadata locally.
-// Network registration will happen when full SDK integration is enabled.
-func (c *Client) CreateSpace(ctx context.Context, ownerAID string, spaceType string, signingKey crypto.PrivKey) (*SpaceCreateResult, error) {
+// CreateSpaceWithKeys creates a new space using a full SpaceKeySet.
+// In local mode, this uses StoragePayloadForSpaceCreate to produce real
+// CID-based space IDs and proper crypto artifacts.
+func (c *Client) CreateSpaceWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *SpaceKeySet) (*SpaceCreateResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	if !c.initialized {
+		return nil, fmt.Errorf("client not initialized")
+	}
+
+	// Compute replication key
+	repKey, err := ComputeReplicationKey(keys.SigningKey)
+	if err != nil {
+		return nil, fmt.Errorf("computing replication key: %w", err)
+	}
+
+	metadata := []byte(fmt.Sprintf(`{"owner":"%s","type":"%s","created":"%s"}`,
+		ownerAID, spaceType, time.Now().UTC().Format(time.RFC3339)))
+
+	payload := spacepayloads.SpaceCreatePayload{
+		SigningKey:     keys.SigningKey,
+		MasterKey:      keys.MasterKey,
+		SpaceType:      spaceType,
+		ReplicationKey: repKey,
+		SpacePayload:   []byte(ownerAID),
+		ReadKey:        keys.ReadKey,
+		MetadataKey:    keys.MetadataKey,
+		Metadata:       metadata,
+	}
+
+	// Generate real storage payload with CID-based ID
+	storagePayload, err := spacepayloads.StoragePayloadForSpaceCreate(payload)
+	if err != nil {
+		return nil, fmt.Errorf("creating storage payload: %w", err)
+	}
+
+	spaceID := storagePayload.SpaceHeaderWithId.Id
+
+	// Store via local storage provider
+	if c.storageProvider != nil {
+		if _, err := c.storageProvider.CreateSpaceStorage(ctx, storagePayload); err != nil {
+			// If already exists, that's OK
+			if err.Error() != "space storage already exists" {
+				return nil, fmt.Errorf("creating space storage: %w", err)
+			}
+		}
+	}
+
+	// Persist keys
+	if err := PersistSpaceKeySet(c.dataDir, spaceID, keys); err != nil {
+		return nil, fmt.Errorf("persisting space keys: %w", err)
+	}
+
+	// Cache the space
+	c.spaceCache.Store(spaceID, true)
+
+	return &SpaceCreateResult{
+		SpaceID:   spaceID,
+		CreatedAt: time.Now().UTC(),
+		OwnerAID:  ownerAID,
+		SpaceType: spaceType,
+		Keys:      keys,
+	}, nil
+}
+
+// GetSpace returns nil in local mode — full space objects require the SDK client.
+// Local mode tracks spaces by ID but doesn't open full commonspace.Space instances.
+func (c *Client) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	return nil, fmt.Errorf("GetSpace not supported in local mode; use SDKClient for full space access")
+}
+
+// GetDataDir returns the data directory path
+func (c *Client) GetDataDir() string {
+	return c.dataDir
+}
+
+// CreateSpace creates a new space.
+// In local mode, this generates a SpaceKeySet internally and delegates to
+// CreateSpaceWithKeys for real CID-based space IDs.
+func (c *Client) CreateSpace(ctx context.Context, ownerAID string, spaceType string, signingKey crypto.PrivKey) (*SpaceCreateResult, error) {
 	if !c.initialized {
 		return nil, fmt.Errorf("client not initialized")
 	}
@@ -265,39 +342,29 @@ func (c *Client) CreateSpace(ctx context.Context, ownerAID string, spaceType str
 		signingKey = c.peerKeyManager.GetPrivKey()
 	}
 
-	// Generate a deterministic space ID based on owner and type
-	spaceID := generateSpaceID(ownerAID, spaceType, signingKey)
-
-	// Create local storage directory for this space
-	spacePath := filepath.Join(c.dataDir, "spaces", spaceID)
-	if err := os.MkdirAll(spacePath, 0755); err != nil {
-		return nil, fmt.Errorf("creating space directory: %w", err)
+	masterKey, _, err := crypto.GenerateRandomEd25519KeyPair()
+	if err != nil {
+		return nil, fmt.Errorf("generating master key: %w", err)
 	}
 
-	// Store space metadata locally
-	metadata := map[string]interface{}{
-		"spaceId":   spaceID,
-		"ownerAid":  ownerAID,
-		"spaceType": spaceType,
-		"createdAt": time.Now().UTC().Format(time.RFC3339),
-		"networkId": c.networkID,
-		"synced":    false, // Will be true when registered with coordinator
+	readKey, err := crypto.NewRandomAES()
+	if err != nil {
+		return nil, fmt.Errorf("generating read key: %w", err)
 	}
 
-	metadataPath := filepath.Join(spacePath, "metadata.json")
-	metadataBytes, _ := yaml.Marshal(metadata)
-	if err := os.WriteFile(metadataPath, metadataBytes, 0644); err != nil {
-		return nil, fmt.Errorf("writing space metadata: %w", err)
+	metadataKey, _, err := crypto.GenerateRandomEd25519KeyPair()
+	if err != nil {
+		return nil, fmt.Errorf("generating metadata key: %w", err)
 	}
 
-	fmt.Printf("[any-sync] Created local space: %s (type: %s, owner: %s)\n", spaceID[:16]+"...", spaceType, ownerAID[:16]+"...")
+	keys := &SpaceKeySet{
+		SigningKey:   signingKey,
+		MasterKey:    masterKey,
+		ReadKey:      readKey,
+		MetadataKey:  metadataKey,
+	}
 
-	return &SpaceCreateResult{
-		SpaceID:   spaceID,
-		CreatedAt: time.Now().UTC(),
-		OwnerAID:  ownerAID,
-		SpaceType: spaceType,
-	}, nil
+	return c.CreateSpaceWithKeys(ctx, ownerAID, spaceType, keys)
 }
 
 // generateSpaceID creates a deterministic space ID from owner and type
@@ -507,6 +574,11 @@ func writeJSONFile(path string, v interface{}) error {
 		return fmt.Errorf("marshaling JSON: %w", err)
 	}
 	return os.WriteFile(path, data, 0644)
+}
+
+// parseJSONFile unmarshals JSON data into v
+func parseJSONFile(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
 }
 
 // generateReplicationKey generates a replication key from a signing key
