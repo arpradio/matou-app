@@ -107,7 +107,7 @@
           @click="handleContinue"
         >
           <template v-if="claimStep === 'done'">
-            Continue to Dashboard
+            Continue
             <ArrowRight class="w-4 h-4 ml-2" />
           </template>
           <template v-else>
@@ -141,12 +141,13 @@ const emit = defineEmits<{
 const store = useOnboardingStore();
 const { step: claimStep, error: claimError, progress, claimIdentity, reset } = useClaimIdentity();
 
-const stepOrder: ClaimStep[] = ['connecting', 'admitting', 'rotating', 'done'];
+const stepOrder: ClaimStep[] = ['connecting', 'admitting', 'rotating', 'securing', 'done'];
 
 const steps = [
   { key: 'connecting' as ClaimStep, label: 'Connecting to agent' },
   { key: 'admitting' as ClaimStep, label: 'Accepting credential grants' },
   { key: 'rotating' as ClaimStep, label: 'Rotating keys for security' },
+  { key: 'securing' as ClaimStep, label: 'Generating recovery phrase' },
   { key: 'done' as ClaimStep, label: 'Claim complete' },
 ];
 

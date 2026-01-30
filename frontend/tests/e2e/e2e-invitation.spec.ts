@@ -80,7 +80,15 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
   test('admin creates invitation', async () => {
     test.setTimeout(TIMEOUT.orgSetup); // 2 min — credential issuance + OOBI resolution
 
-    // Verify admin is on dashboard and is recognized as admin
+    // After fresh org setup the admin lands on pending-approval screen.
+    // Credential polling finds the self-issued credential and shows a welcome overlay.
+    // After mnemonic login (existing org), admin goes directly to dashboard.
+    const onDashboard = adminPage.url().includes('#/dashboard');
+    if (!onDashboard) {
+      const enterBtn = adminPage.getByRole('button', { name: /enter community/i });
+      await expect(enterBtn).toBeVisible({ timeout: TIMEOUT.orgSetup });
+      await enterBtn.click();
+    }
     await expect(adminPage).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.short });
 
     // Wait for admin section to render (admin check runs in onMounted)
@@ -204,19 +212,70 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       ).toBeVisible({ timeout: TIMEOUT.orgSetup });
       console.log('[Test] Invitation claimed successfully');
 
-      // Click "Continue to Dashboard"
-      await inviteePage.getByRole('button', { name: /continue to dashboard/i }).click();
+      // Click "Continue" (now goes to profile-confirmation, not dashboard)
+      await inviteePage.getByRole('button', { name: /continue/i }).click();
+
+      // --- Profile Confirmation Screen: Save Your Recovery Phrase ---
+      console.log('[Test] Waiting for recovery phrase screen...');
+      await expect(
+        inviteePage.getByRole('heading', { level: 1, name: /save your recovery phrase/i }),
+      ).toBeVisible({ timeout: TIMEOUT.long });
+
+      // Read 12 mnemonic words from the word cards
+      const wordCards = inviteePage.locator('.word-card');
+      await expect(wordCards.first()).toBeVisible({ timeout: TIMEOUT.short });
+      const wordCount = await wordCards.count();
+      expect(wordCount).toBe(12);
+
+      const mnemonicWords: string[] = [];
+      for (let i = 0; i < wordCount; i++) {
+        const text = await wordCards.nth(i).locator('.font-mono').textContent();
+        mnemonicWords.push(text!.trim());
+      }
+      console.log(`[Test] Captured ${mnemonicWords.length} mnemonic words`);
+
+      // Check the "I have written down..." checkbox
+      const writtenCheckbox = inviteePage.locator('input[type="checkbox"]');
+      await writtenCheckbox.check();
+
+      // Click "Continue to Verification"
+      await inviteePage.getByRole('button', { name: /continue to verification/i }).click();
+
+      // --- Mnemonic Verification Screen ---
+      console.log('[Test] Waiting for mnemonic verification screen...');
+      await expect(
+        inviteePage.getByRole('heading', { name: /verify your recovery phrase/i }),
+      ).toBeVisible({ timeout: TIMEOUT.short });
+
+      // Read which 3 word indices are requested and fill them in
+      const wordInputs = inviteePage.locator('.word-input-group');
+      const inputCount = await wordInputs.count();
+      expect(inputCount).toBe(3);
+
+      for (let i = 0; i < inputCount; i++) {
+        const group = wordInputs.nth(i);
+        const label = await group.locator('label').textContent();
+        // Extract word number from label like "Word #3"
+        const match = label!.match(/(\d+)/);
+        const wordIndex = parseInt(match![1], 10) - 1; // 0-based
+        const input = group.locator('input');
+        await input.fill(mnemonicWords[wordIndex]);
+      }
+
+      // Click "Verify and Continue"
+      await inviteePage.getByRole('button', { name: /verify and continue/i }).click();
 
       // --- Should navigate to dashboard ---
       console.log('[Test] Waiting for dashboard...');
       await expect(inviteePage).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.long });
       console.log('[Test] PASS - Invitee on dashboard after claiming identity');
 
-      // --- Verify session persisted ---
-      const hasPasscode = await inviteePage.evaluate(() => {
-        return !!localStorage.getItem('matou_passcode');
+      // --- Verify session persisted with NEW passcode (not the invite code) ---
+      const storedPasscode = await inviteePage.evaluate(() => {
+        return localStorage.getItem('matou_passcode');
       });
-      expect(hasPasscode, 'Passcode should be persisted in localStorage').toBe(true);
+      expect(storedPasscode, 'Passcode should be persisted in localStorage').toBeTruthy();
+      expect(storedPasscode, 'Stored passcode should differ from invite code (agent passcode was rotated)').not.toBe(inviteCode);
     } finally {
       await inviteeContext.close();
     }
@@ -224,13 +283,8 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
 
   // ------------------------------------------------------------------
   // Test 3: Old claim link no longer works after claiming
-  // SKIPPED: Agent passcode rotation is not available due to signify-ts/KERIA
-  // version incompatibility (controller.rotate() omits `br`/`ba` fields).
-  // Without passcode rotation, the old invite code still connects to the agent.
-  // AID key rotation provides cryptographic ownership but doesn't invalidate the code.
-  // Re-enable when signify-ts agent passcode rotation is fixed.
   // ------------------------------------------------------------------
-  test.skip('claimed invite code is invalid after use', async ({ browser }) => {
+  test('claimed invite code is invalid after use', async ({ browser }) => {
     test.setTimeout(TIMEOUT.long);
 
     expect(inviteCode, 'Invite code must exist from previous test').toBeTruthy();

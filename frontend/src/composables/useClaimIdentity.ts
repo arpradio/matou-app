@@ -2,19 +2,15 @@
  * Composable for the invitee claim flow.
  * Connects to a pre-created KERIA agent using the passcode from the claim link,
  * auto-admits IPEX credential grants, rotates AID keys for cryptographic ownership,
- * and persists the session.
- *
- * NOTE: Agent passcode rotation is skipped due to a signify-ts / KERIA version
- * incompatibility (controller.rotate() omits `br` and `ba` fields required by KERIA).
- * The temp passcode from the claim URL is used as the session passcode.
- * AID key rotation still provides cryptographic ownership — the admin's signing
- * keys are invalidated even though the agent connection passcode is unchanged.
+ * generates a recovery mnemonic, rotates the agent passcode, and persists the session.
  */
 import { ref } from 'vue';
-import { useKERIClient } from 'src/lib/keri/client';
+import { generateMnemonic } from '@scure/bip39';
+import { wordlist } from '@scure/bip39/wordlists/english.js';
+import { useKERIClient, KERIClient } from 'src/lib/keri/client';
 import { useOnboardingStore } from 'stores/onboarding';
 
-export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'done' | 'error';
+export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'securing' | 'done' | 'error';
 
 export function useClaimIdentity() {
   const keriClient = useKERIClient();
@@ -42,11 +38,9 @@ export function useClaimIdentity() {
   }
 
   /**
-   * Run the full claim flow: connect, admit grants, rotate AID keys, persist session.
+   * Run the full claim flow: connect, admit grants, rotate AID keys,
+   * generate recovery mnemonic, rotate agent passcode, and persist session.
    * Assumes validate() has already been called and the client is connected.
-   *
-   * After claiming, the invitee goes directly to the dashboard (no mnemonic screens).
-   * The temp passcode is the session key; recovery requires admin re-invitation.
    */
   async function claimIdentity(passcode: string): Promise<boolean> {
     error.value = null;
@@ -117,17 +111,30 @@ export function useClaimIdentity() {
       const credentials = await client.credentials().list();
       console.log(`[ClaimIdentity] Credentials in wallet: ${credentials.length}`);
 
-      // Step 3: Rotate AID keys (take cryptographic ownership)
+      // Step 3: Generate recovery mnemonic and rotate agent passcode
+      step.value = 'securing';
+      progress.value = 'Generating recovery phrase...';
+
+      const mnemonic = generateMnemonic(wordlist, 128); // 12 words
+      const mnemonicWords = mnemonic.split(' ');
+      const newPasscode = KERIClient.passcodeFromMnemonic(mnemonic);
+
+      progress.value = 'Rotating agent passcode...';
+      await keriClient.rotateAgentPasscode(newPasscode);
+      console.log('[ClaimIdentity] Agent passcode rotated');
+
+      // Step 4: Rotate AID keys (take cryptographic ownership)
       step.value = 'rotating';
       progress.value = 'Rotating keys to take ownership...';
 
       await keriClient.rotateKeys(aid.name);
       console.log('[ClaimIdentity] AID keys rotated');
 
-      // Step 4: Persist session using the temp passcode
-      // Agent passcode rotation is skipped (signify-ts/KERIA incompatibility)
-      // so the temp passcode from the claim URL remains the agent connection secret.
-      localStorage.setItem('matou_passcode', passcode);
+      // Store mnemonic for the confirmation/verification screens
+      onboardingStore.setMnemonic(mnemonicWords);
+
+      // Persist session with the NEW passcode (old invite code is now invalid)
+      localStorage.setItem('matou_passcode', newPasscode);
 
       // Populate identity info for the dashboard
       onboardingStore.setUserAID(aid.prefix);

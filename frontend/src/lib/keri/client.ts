@@ -331,14 +331,17 @@ export class KERIClient {
     const aids = await Promise.all(
       listResult.aids.map((a: { name: string }) => this.client!.identifiers().get(a.name))
     );
-    await this.client.rotate(newBran, aids);
-    console.log('[KERIClient] Passcode rotated, reconnecting with new passcode...');
-
-    // Old connection is stale — re-create and reconnect
-    this.client = new SignifyClient(this.keriaUrl, newBran, Tier.low, this.keriaBootUrl);
-    await this.client.connect();
-    this.connected = true;
-    console.log('[KERIClient] Reconnected with new passcode');
+    const res = await this.client.rotate(newBran, aids);
+    if (!res.ok) {
+      const body = await res.text().catch(() => '');
+      throw new Error(`Agent passcode rotation failed (${res.status}): ${body}`);
+    }
+    // After client.rotate(), the controller state is updated in-place:
+    // - controller.signer/nsigner use the new bran's keys
+    // - authn is recreated with the new signer (via our signify-ts patch)
+    // Do NOT create a new SignifyClient — a new bran would derive a different
+    // controller prefix, which KERIA wouldn't recognize.
+    console.log('[KERIClient] Agent passcode rotated successfully');
   }
 
   /**

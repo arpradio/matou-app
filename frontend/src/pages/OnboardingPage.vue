@@ -152,12 +152,14 @@ const handleContinue = (data?: unknown) => {
       store.navigateTo(next as typeof store.currentScreen);
     }
   } else if (path === 'claim') {
-    // Claim flow: invite-code → claim-welcome → profile-form → claim-processing → main
+    // Claim flow: invite-code → claim-welcome → profile-form → claim-processing → profile-confirmation → mnemonic-verification → main
     const forwardMap: Record<string, string> = {
       'invite-code': 'claim-welcome',
       'claim-welcome': 'profile-form',
       'profile-form': 'claim-processing',
-      'claim-processing': 'main',
+      'claim-processing': 'profile-confirmation',
+      'profile-confirmation': 'mnemonic-verification',
+      'mnemonic-verification': 'main',
     };
     const next = forwardMap[current];
     if (next) {
@@ -191,6 +193,8 @@ const handleBack = () => {
     'invite-code': 'splash',
     'claim-welcome': 'invite-code',
     'profile-form': 'claim-welcome',
+    // No back from profile-confirmation (can't undo claim processing)
+    'mnemonic-verification': 'profile-confirmation',
   };
 
   const backMap = path === 'recover'
