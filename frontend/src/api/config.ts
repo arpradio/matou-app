@@ -3,7 +3,7 @@
  * Fetches org configuration from the config server and caches in localStorage.
  */
 
-const CONFIG_SERVER_URL = 'http://localhost:3904';
+const CONFIG_SERVER_URL = import.meta.env.VITE_CONFIG_SERVER_URL || 'http://localhost:3904';
 const LOCAL_CACHE_KEY = 'matou_org_config';
 
 export interface AdminInfo {
@@ -30,6 +30,8 @@ export interface OrgConfig {
   };
   // any-sync community space ID (created during org setup)
   communitySpaceId?: string;
+  // any-sync admin private space ID (created during org setup with mnemonic-derived keys)
+  adminPrivateSpaceId?: string;
   generated: string;
 }
 

@@ -117,6 +117,12 @@
               <span class="text-sm" :class="stepClass('credential')">Issue admin credential</span>
             </div>
             <div class="flex items-center gap-2">
+              <CheckCircle2 v-if="isStepComplete('space')" class="w-4 h-4 text-green-400" />
+              <Loader2 v-else-if="isStepActive('space')" class="w-4 h-4 text-white animate-spin" />
+              <Circle v-else class="w-4 h-4 text-white/40" />
+              <span class="text-sm" :class="stepClass('space')">Create spaces</span>
+            </div>
+            <div class="flex items-center gap-2">
               <CheckCircle2 v-if="isStepComplete('complete')" class="w-4 h-4 text-green-400" />
               <Loader2 v-else-if="isStepActive('Saving')" class="w-4 h-4 text-white animate-spin" />
               <Circle v-else class="w-4 h-4 text-white/40" />
@@ -158,7 +164,7 @@ function isStepComplete(keyword: string): boolean {
     return progress.value.includes('complete');
   }
   const progressLower = progress.value.toLowerCase();
-  const steps = ['connecting', 'admin', 'organization', 'registry', 'credential', 'saving'];
+  const steps = ['connecting', 'admin', 'organization', 'registry', 'credential', 'space', 'saving'];
   const stepIndex = steps.indexOf(keyword.toLowerCase());
   const currentStepIndex = steps.findIndex(s => progressLower.includes(s));
   return stepIndex >= 0 && currentStepIndex >= 0 && stepIndex < currentStepIndex;

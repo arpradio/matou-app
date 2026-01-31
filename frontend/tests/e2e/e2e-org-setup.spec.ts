@@ -10,6 +10,7 @@ import {
   captureMnemonicWords,
   completeMnemonicVerification,
   saveAccounts,
+  loadAccounts,
   TestAccounts,
 } from './utils/test-helpers';
 
@@ -233,8 +234,14 @@ test.describe.serial('Organization Setup', () => {
     const adminAid = config.admin?.aid || config.admins?.[0]?.aid;
     expect(adminAid, 'Admin AID must exist in config').toBeTruthy();
 
+    const accounts = loadAccounts();
+    const adminMnemonicStr = accounts.admin?.mnemonic?.join(' ') || '';
+
     const privateResponse = await request.post(`${BACKEND_URL}/api/v1/spaces/private`, {
-      data: { userAid: adminAid },
+      data: {
+        userAid: adminAid,
+        mnemonic: adminMnemonicStr,
+      },
     });
     expect(privateResponse.ok(), `Admin private space creation failed: ${privateResponse.status()}`).toBe(true);
 

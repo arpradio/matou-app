@@ -7,6 +7,7 @@ import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
 import { fetchOrgConfig } from 'src/api/config';
 import type { PendingRegistration } from './useRegistrationPolling';
+import { BACKEND_URL } from 'src/lib/api/client';
 
 // Membership credential schema
 const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
@@ -179,7 +180,7 @@ export function useAdminActions() {
 
       // 5. Invite user to community space (non-blocking)
       try {
-        const inviteResponse = await fetch('http://localhost:8080/api/v1/spaces/community/invite', {
+        const inviteResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/community/invite`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({

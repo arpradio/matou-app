@@ -9,6 +9,7 @@ import { KERIClient, useKERIClient } from 'src/lib/keri/client';
 import { saveOrgConfig, type OrgConfig } from 'src/api/config';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useIdentityStore } from 'stores/identity';
+import { BACKEND_URL } from 'src/lib/api/client';
 
 export interface OrgSetupConfig {
   orgName: string;
@@ -21,6 +22,8 @@ export interface OrgSetupResult {
   registryId: string;
   credentialSaid: string;
   mnemonic: string[];
+  communitySpaceId?: string;
+  privateSpaceId?: string;
 }
 
 // Membership credential schema SAID (from schema server)
@@ -141,7 +144,59 @@ export function useOrgSetup() {
         console.log('[OrgSetup] Using fallback admin OOBI URL:', adminOobi);
       }
 
-      // Step 9: Save config to server (and localStorage cache)
+      // Step 9: Create spaces in any-sync
+      progress.value = 'Creating spaces...';
+      let communitySpaceId: string | undefined;
+      let adminPrivateSpaceId: string | undefined;
+
+      try {
+        const spaceResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/community`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orgAid: orgAid.prefix,
+            orgName: config.orgName,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+
+        if (spaceResponse.ok) {
+          const spaceResult = await spaceResponse.json() as { spaceId: string; success: boolean };
+          communitySpaceId = spaceResult.spaceId;
+          console.log('[OrgSetup] Created community space:', spaceResult.spaceId);
+        } else {
+          console.warn('[OrgSetup] Failed to create community space:', await spaceResponse.text());
+        }
+      } catch (err) {
+        // Non-fatal error - space can be created later
+        console.warn('[OrgSetup] Community space creation deferred:', err);
+      }
+
+      // Step 9b: Create admin private space with mnemonic-derived keys
+      progress.value = 'Creating admin private space...';
+      try {
+        const privateResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/private`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            userAid: adminAid.prefix,
+            mnemonic: mnemonic,
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (privateResponse.ok) {
+          const privateResult = await privateResponse.json();
+          adminPrivateSpaceId = privateResult.spaceId;
+          console.log('[OrgSetup] Created admin private space:', privateResult.spaceId,
+            privateResult.created ? '(new)' : '(existing)');
+        } else {
+          console.warn('[OrgSetup] Failed to create admin private space:', await privateResponse.text());
+        }
+      } catch (err) {
+        console.warn('[OrgSetup] Admin private space creation deferred:', err);
+      }
+
+      // Step 10: Save config to server (single save with space IDs included)
       progress.value = 'Saving configuration...';
       const orgConfig: OrgConfig = {
         organization: {
@@ -164,40 +219,13 @@ export function useOrgSetup() {
           id: registryId,
           name: registryName,
         },
+        communitySpaceId,
+        adminPrivateSpaceId,
         generated: new Date().toISOString(),
       };
 
       await saveOrgConfig(orgConfig);
       console.log('[OrgSetup] Config saved to server');
-
-      // Step 10: Create community space in any-sync
-      progress.value = 'Creating community space...';
-      try {
-        const spaceResponse = await fetch('http://localhost:8080/api/v1/spaces/community', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orgAid: orgAid.prefix,
-            orgName: config.orgName,
-          }),
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (spaceResponse.ok) {
-          const spaceResult = await spaceResponse.json() as { spaceId: string; success: boolean };
-          console.log('[OrgSetup] Created community space:', spaceResult.spaceId);
-
-          // Update org config with community space ID
-          orgConfig.communitySpaceId = spaceResult.spaceId;
-          await saveOrgConfig(orgConfig);
-          console.log('[OrgSetup] Updated config with community space ID');
-        } else {
-          console.warn('[OrgSetup] Failed to create community space:', await spaceResponse.text());
-        }
-      } catch (err) {
-        // Non-fatal error - space can be created later
-        console.warn('[OrgSetup] Community space creation deferred:', err);
-      }
 
       // Step 11: Store admin passcode in localStorage
       localStorage.setItem('matou_passcode', adminPasscode);
@@ -213,6 +241,9 @@ export function useOrgSetup() {
       onboardingStore.setUserAID(adminAid.prefix);
       onboardingStore.updateProfile({ name: config.adminName });
 
+      // Fetch user spaces into identity store before transitioning to dashboard
+      await identityStore.fetchUserSpaces();
+
       // Store result
       result.value = {
         adminAid: adminAid.prefix,
@@ -220,6 +251,8 @@ export function useOrgSetup() {
         registryId,
         credentialSaid: credential.said,
         mnemonic: mnemonicWords,
+        communitySpaceId,
+        privateSpaceId: adminPrivateSpaceId,
       };
 
       progress.value = 'Setup complete!';

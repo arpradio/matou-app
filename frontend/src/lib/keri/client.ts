@@ -34,6 +34,10 @@ export class KERIClient {
   private readonly keriaUrl = import.meta.env.VITE_KERIA_ADMIN_URL || 'http://localhost:3901';
   private readonly keriaBootUrl = import.meta.env.VITE_KERIA_BOOT_URL || 'http://localhost:3903';
 
+  // Browser-facing vs Docker-internal CESR URLs for OOBI conversion
+  private readonly cesrUrl = import.meta.env.VITE_KERIA_CESR_URL || 'http://localhost:3902';
+  private readonly dockerCesrUrl = import.meta.env.VITE_KERIA_DOCKER_CESR_URL || '';
+
   /**
    * Initialize and connect to KERIA agent
    * For new users, this will boot (create) the agent first
@@ -259,6 +263,18 @@ export class KERIClient {
   }
 
   /**
+   * Convert a browser-facing OOBI URL to Docker-internal URL for KERIA resolution.
+   * KERIA runs inside Docker and can't reach localhost:4902 — it needs keria:3902.
+   * getOOBI() normalizes keria:3902 → localhost:4902 for browsers; this reverses it.
+   */
+  private toInternalOobiUrl(oobi: string): string {
+    if (this.dockerCesrUrl && this.cesrUrl) {
+      return oobi.replace(this.cesrUrl, this.dockerCesrUrl);
+    }
+    return oobi;
+  }
+
+  /**
    * Resolve an OOBI to establish contact with another party
    * @param oobi - The OOBI URL to resolve
    * @param alias - Optional alias for the contact
@@ -269,8 +285,9 @@ export class KERIClient {
     if (!this.client) throw new Error('Not initialized');
 
     try {
-      console.log(`[KERIClient] Resolving OOBI: ${oobi}`);
-      const op = await this.client.oobis().resolve(oobi, alias);
+      const internalOobi = this.toInternalOobiUrl(oobi);
+      console.log(`[KERIClient] Resolving OOBI: ${internalOobi}`);
+      const op = await this.client.oobis().resolve(internalOobi, alias);
       await this.client.operations().wait(op, { signal: AbortSignal.timeout(timeout) });
       console.log(`[KERIClient] OOBI resolved successfully`);
       return true;
@@ -877,20 +894,35 @@ export class KERIClient {
     // Send to each admin
     for (const admin of admins) {
       try {
-        // Resolve admin OOBI and create contact
+        // Resolve admin OOBI and create contact (critical for message delivery)
         if (admin.oobi) {
-          console.log(`[KERIClient] Resolving admin OOBI and creating contact: ${admin.oobi}`);
-          try {
-            const alias = `admin-${admin.aid.substring(0, 8)}`;
-            const op = await this.client.oobis().resolve(admin.oobi, alias);
-            await this.client.operations().wait(op, { signal: AbortSignal.timeout(30000) });
-            console.log(`[KERIClient] Admin contact created with alias: ${alias}`);
-          } catch (oobiErr) {
-            console.warn(`[KERIClient] Failed to resolve OOBI for admin ${admin.aid}:`, oobiErr);
-            // Continue anyway - admin AID might already be known
+          const internalOobi = this.toInternalOobiUrl(admin.oobi);
+          console.log(`[KERIClient] Resolving admin OOBI and creating contact: ${internalOobi}`);
+          const alias = `admin-${admin.aid.substring(0, 8)}`;
+          let oobiResolved = false;
+          for (let attempt = 1; attempt <= 3; attempt++) {
+            try {
+              const op = await this.client.oobis().resolve(internalOobi, alias);
+              await this.client.operations().wait(op, { signal: AbortSignal.timeout(30000) });
+              console.log(`[KERIClient] Admin contact created with alias: ${alias}`);
+              oobiResolved = true;
+              break;
+            } catch (oobiErr) {
+              console.warn(`[KERIClient] OOBI attempt ${attempt}/3 failed for admin ${admin.aid}:`, oobiErr);
+              if (attempt < 3) {
+                await new Promise(r => setTimeout(r, 2000));
+              }
+            }
+          }
+          if (!oobiResolved) {
+            console.error(`[KERIClient] All OOBI attempts failed for admin ${admin.aid}, skipping`);
+            failed.push(admin.aid);
+            continue;
           }
         } else {
           console.warn(`[KERIClient] No OOBI provided for admin ${admin.aid}`);
+          failed.push(admin.aid);
+          continue;
         }
 
         // 1. Send custom EXN message first

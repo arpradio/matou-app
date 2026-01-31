@@ -40,11 +40,10 @@ export default defineConfig({
       testMatch: /e2e-org-setup\.spec\.ts/,
       use: browserConfig,
     },
-    // Registration tests depend on org existing
+    // Registration tests - uses persisted test config from org-setup
     {
       name: 'registration',
       testMatch: /e2e-registration\.spec\.ts/,
-      dependencies: ['org-setup'],
       use: browserConfig,
     },
     // Recovery & error handling - independent

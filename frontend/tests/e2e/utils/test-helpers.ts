@@ -391,7 +391,10 @@ export async function performOrgSetup(
   expect(adminAidFromConfig, 'Admin AID must exist in config').toBeTruthy();
 
   const privateResponse = await request.post(`${BACKEND_URL}/api/v1/spaces/private`, {
-    data: { userAid: adminAidFromConfig },
+    data: {
+      userAid: adminAidFromConfig,
+      mnemonic: adminMnemonic.join(' '),
+    },
   });
   expect(privateResponse.ok(),
     `Admin private space creation failed: ${privateResponse.status()}`).toBe(true);
