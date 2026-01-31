@@ -25,10 +25,12 @@ func TestSendInviteEmail(t *testing.T) {
 	smtpPort := 2525
 
 	sender := NewSender(config.SMTPConfig{
-		Host:     smtpHost,
-		Port:     smtpPort,
-		From:     "invites@matou.nz",
-		FromName: "MATOU",
+		Host:        smtpHost,
+		Port:        smtpPort,
+		From:        "invites@matou.nz",
+		FromName:    "MATOU",
+		LogoURL:     "https://i.imgur.com/zi01gTx.png",
+		TextLogoURL: "https://i.imgur.com/1D3iLWa.png",
 	})
 
 	err := sender.SendInvite(SendInviteRequest{

@@ -3,6 +3,7 @@ package email
 import (
 	"crypto/tls"
 	"fmt"
+	"html/template"
 	"net"
 	"net/smtp"
 	"strings"
@@ -20,19 +21,23 @@ type SendInviteRequest struct {
 
 // Sender handles sending emails via SMTP
 type Sender struct {
-	host     string
-	port     int
-	from     string
-	fromName string
+	host       string
+	port       int
+	from       string
+	fromName   string
+	logoURL    template.URL
+	textURL    template.URL
 }
 
-// NewSender creates a new email Sender from SMTP config
+// NewSender creates a new email Sender from SMTP config.
 func NewSender(cfg config.SMTPConfig) *Sender {
 	return &Sender{
 		host:     cfg.Host,
 		port:     cfg.Port,
 		from:     cfg.From,
 		fromName: cfg.FromName,
+		logoURL:  template.URL(cfg.LogoURL),
+		textURL:  template.URL(cfg.TextLogoURL),
 	}
 }
 
@@ -42,6 +47,8 @@ func (s *Sender) SendInvite(req SendInviteRequest) error {
 		InviterName: req.InviterName,
 		InviteeName: req.InviteeName,
 		InviteCode:  req.InviteCode,
+		LogoURL:     s.logoURL,
+		TextURL:     s.textURL,
 	})
 	if err != nil {
 		return fmt.Errorf("rendering email template: %w", err)

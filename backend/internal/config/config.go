@@ -10,10 +10,12 @@ import (
 
 // SMTPConfig holds SMTP relay configuration for sending emails
 type SMTPConfig struct {
-	Host     string `yaml:"host"`
-	Port     int    `yaml:"port"`
-	From     string `yaml:"from"`
-	FromName string `yaml:"fromName"`
+	Host        string `yaml:"host"`
+	Port        int    `yaml:"port"`
+	From        string `yaml:"from"`
+	FromName    string `yaml:"fromName"`
+	LogoURL     string `yaml:"logoUrl"`
+	TextLogoURL string `yaml:"textLogoUrl"`
 }
 
 // Config represents the complete application configuration
@@ -112,10 +114,12 @@ func Load(configPath, bootstrapPath string) (*Config, error) {
 			ClientConfigPath: "../infrastructure/any-sync/etc/client.yml",
 		},
 		SMTP: SMTPConfig{
-			Host:     "localhost",
-			Port:     2525,
-			From:     "invites@matou.nz",
-			FromName: "MATOU",
+			Host:        "localhost",
+			Port:        2525,
+			From:        "invites@matou.nz",
+			FromName:    "MATOU",
+			LogoURL:     "https://i.imgur.com/zi01gTx.png",
+			TextLogoURL: "https://i.imgur.com/1D3iLWa.png",
 		},
 	}
 

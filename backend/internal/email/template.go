@@ -9,6 +9,8 @@ type inviteTemplateData struct {
 	InviterName string
 	InviteeName string
 	InviteCode  string
+	LogoURL     template.URL
+	TextURL     template.URL
 }
 
 const inviteEmailHTML = `<!DOCTYPE html>
@@ -24,8 +26,17 @@ const inviteEmailHTML = `<!DOCTYPE html>
         <table role="presentation" width="480" cellspacing="0" cellpadding="0" border="0" style="background-color:#ffffff; border-radius:12px; overflow:hidden;">
           <!-- Header -->
           <tr>
-            <td style="background-color:#1e5f74; padding:28px 32px; text-align:center;">
-              <h1 style="margin:0; color:#ffffff; font-size:22px; font-weight:700; letter-spacing:0.5px;">MATOU</h1>
+            <td style="background-color:#1e5f74; padding:24px 32px; text-align:center;">
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" align="center">
+                <tr>
+                  <td style="vertical-align:middle; padding-right:12px;">
+                    <img src="{{.LogoURL}}" alt="" width="80" height="40" style="display:block; border:0;" />
+                  </td>
+                  <td style="vertical-align:middle;">
+                    <img src="{{.TextURL}}" alt="MATOU" width="140" height="40" style="display:block; border:0;" />
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
           <!-- Body -->
@@ -35,7 +46,7 @@ const inviteEmailHTML = `<!DOCTYPE html>
                 Kia ora{{if .InviteeName}} <strong>{{.InviteeName}}</strong>{{end}},
               </p>
               <p style="margin:0 0 24px; color:#374151; font-size:15px; line-height:1.6;">
-                {{.InviterName}} has invited you to join their organisation on MATOU. Follow these steps to get started:
+                {{.InviterName}} has invited you to join MATOU. Follow these steps to get started:
               </p>
               <!-- Steps -->
               <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 24px;">
@@ -73,7 +84,7 @@ const inviteEmailHTML = `<!DOCTYPE html>
           <!-- Footer -->
           <tr>
             <td style="background-color:#f9fafb; padding:20px 32px; border-top:1px solid #e5e7eb; text-align:center;">
-              <p style="margin:0; color:#9ca3af; font-size:12px;">MATOU &mdash; Decentralised trust for communities</p>
+              <p style="margin:0; color:#9ca3af; font-size:12px;">MATOU &mdash; Connection &vert; Collaboration &vert; Innovation </p>
             </td>
           </tr>
         </table>
