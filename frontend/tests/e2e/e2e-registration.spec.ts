@@ -1,10 +1,12 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test';
 import { setupTestConfig } from './utils/mock-config';
 import { requireAllTestServices } from './utils/keri-testnet';
+import { BackendManager } from './utils/backend-manager';
 import {
   FRONTEND_URL,
   TIMEOUT,
   setupPageLogging,
+  setupBackendRouting,
   registerUser,
   loginWithMnemonic,
   uniqueSuffix,
@@ -19,6 +21,12 @@ import {
  * Tests admin approval, decline, and messaging workflows.
  * Self-sufficient: if org-setup hasn't been run yet, performs it automatically.
  *
+ * Multi-backend: In per-user mode, admin and each user run their own Go backend
+ * instance. The admin uses the default backend on port 9080 (started manually).
+ * Each user test spawns a fresh backend on a dynamic port via BackendManager.
+ * Playwright route interception redirects each user context's API calls to its
+ * own backend.
+ *
  * Run: npx playwright test --project=registration
  */
 
@@ -26,12 +34,14 @@ test.describe.serial('Registration Approval Flow', () => {
   let accounts: TestAccounts;
   let adminContext: BrowserContext;
   let adminPage: Page;
+  const backends = new BackendManager();
 
   test.beforeAll(async ({ browser, request }) => {
     // Fail fast if required services are not running
     await requireAllTestServices();
 
     // Create persistent admin context with test config isolation
+    // Admin uses the default backend on port 9080 (no routing needed)
     adminContext = await browser.newContext();
     await setupTestConfig(adminContext);
     adminPage = await adminContext.newPage();
@@ -72,6 +82,8 @@ test.describe.serial('Registration Approval Flow', () => {
   });
 
   test.afterAll(async () => {
+    // Stop all user backends spawned during tests
+    await backends.stopAll();
     await adminContext?.close();
   });
 
@@ -79,35 +91,41 @@ test.describe.serial('Registration Approval Flow', () => {
   // Test 1: Admin approves user registration
   // ------------------------------------------------------------------
   test('admin approves user registration', async ({ browser }) => {
+    // Spawn a dedicated backend for this user
+    const userBackend = await backends.start('user-approve');
+
     const userContext = await browser.newContext();
     await setupTestConfig(userContext);
+    // Route all backend API calls from this context to the user's backend
+    await setupBackendRouting(userContext, userBackend.port);
     const userPage = await userContext.newPage();
     setupPageLogging(userPage, 'User-Approve');
 
     const userName = `Approve_${uniqueSuffix()}`;
 
     try {
-      // A. Set up space API listener before registration triggers the call
-      const privateSpaceResponse = userPage.waitForResponse(
-        resp => resp.url().includes('/api/v1/spaces/private') && resp.request().method() === 'POST',
+      // A. Set up identity/set listener before registration triggers the call
+      const identitySetResponse = userPage.waitForResponse(
+        resp => resp.url().includes('/api/v1/identity/set') && resp.request().method() === 'POST',
         { timeout: TIMEOUT.aidCreation },
       );
 
-      // 1. User registers
+      // 1. User registers (on their own backend via routing)
       await registerUser(userPage, userName);
 
-      // 2. Verify private space was created during registration
-      const psResp = await privateSpaceResponse;
-      expect(psResp.status()).toBe(200);
-      const psBody = await psResp.json();
-      expect(psBody.spaceId).toBeTruthy();
-      console.log('[Test] Private space created:', psBody.spaceId, psBody.created ? '(new)' : '(existing)');
+      // 2. Verify backend identity was configured during registration
+      const idResp = await identitySetResponse;
+      expect(idResp.status()).toBe(200);
+      const idBody = await idResp.json();
+      expect(idBody.success).toBe(true);
+      expect(idBody.peerId).toBeTruthy();
+      console.log('[Test] Backend identity set:', idBody.peerId?.slice(0, 16), 'space:', idBody.privateSpaceId);
 
       // 2b. Verify mnemonic was included in the request for deterministic key derivation
-      const psReqBody = psResp.request().postDataJSON();
-      expect(psReqBody.mnemonic).toBeTruthy();
-      expect(psReqBody.mnemonic.split(' ')).toHaveLength(12);
-      console.log('[Test] Private space request included 12-word mnemonic');
+      const idReqBody = idResp.request().postDataJSON();
+      expect(idReqBody.mnemonic).toBeTruthy();
+      expect(idReqBody.mnemonic.split(' ')).toHaveLength(12);
+      console.log('[Test] Identity/set request included 12-word mnemonic');
 
       // 2c. Test session restart: reload without clearing localStorage
       console.log('[Test] Testing session restart...');
@@ -135,10 +153,12 @@ test.describe.serial('Registration Approval Flow', () => {
       console.log('[Test] Registration card visible');
 
       // B. Set up invite + sync listeners before approval
+      // Invite goes through admin's backend (port 9080)
       const inviteResponse = adminPage.waitForResponse(
         resp => resp.url().includes('/api/v1/spaces/community/invite') && resp.request().method() === 'POST',
         { timeout: TIMEOUT.long },
       );
+      // Sync goes through user's backend (routed port)
       const syncResponse = userPage.waitForResponse(
         resp => resp.url().includes('/api/v1/sync/credentials') && resp.request().method() === 'POST',
         { timeout: TIMEOUT.long },
@@ -148,7 +168,7 @@ test.describe.serial('Registration Approval Flow', () => {
       console.log('[Test] Admin clicking approve...');
       await registrationCard.getByRole('button', { name: /approve/i }).click();
 
-      // 5. Verify community space invite during approval
+      // 5. Verify community space invite during approval (from admin's backend)
       const invResp = await inviteResponse;
       expect(invResp.status()).toBe(200);
       const invBody = await invResp.json();
@@ -164,7 +184,7 @@ test.describe.serial('Registration Approval Flow', () => {
       await userPage.getByRole('button', { name: /enter community/i }).click();
       await expect(userPage).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.short });
 
-      // 8. Verify credential synced to spaces (including community space)
+      // 8. Verify credential synced to spaces (through user's backend)
       const syncResp = await syncResponse;
       expect(syncResp.status()).toBe(200);
       const syncBody = await syncResp.json();
@@ -175,6 +195,7 @@ test.describe.serial('Registration Approval Flow', () => {
       console.log('[Test] PASS - User approved, spaces created and synced');
     } finally {
       await userContext.close();
+      await backends.stop('user-approve');
     }
   });
 
@@ -182,15 +203,18 @@ test.describe.serial('Registration Approval Flow', () => {
   // Test 2: Admin declines user registration
   // ------------------------------------------------------------------
   test('admin declines user registration', async ({ browser }) => {
+    const userBackend = await backends.start('user-decline');
+
     const userContext = await browser.newContext();
     await setupTestConfig(userContext);
+    await setupBackendRouting(userContext, userBackend.port);
     const userPage = await userContext.newPage();
     setupPageLogging(userPage, 'User-Decline');
 
     const userName = `Decline_${uniqueSuffix()}`;
 
     try {
-      // User registers
+      // User registers (on their own backend)
       await registerUser(userPage, userName);
 
       // Wait for admin to see registration card
@@ -223,6 +247,7 @@ test.describe.serial('Registration Approval Flow', () => {
       console.log('[Test] PASS - User sees rejection');
     } finally {
       await userContext.close();
+      await backends.stop('user-decline');
     }
   });
 
@@ -230,15 +255,18 @@ test.describe.serial('Registration Approval Flow', () => {
   // Test 3: Admin sends message to pending applicant
   // ------------------------------------------------------------------
   test('admin sends message to pending applicant', async ({ browser }) => {
+    const userBackend = await backends.start('user-message');
+
     const userContext = await browser.newContext();
     await setupTestConfig(userContext);
+    await setupBackendRouting(userContext, userBackend.port);
     const userPage = await userContext.newPage();
     setupPageLogging(userPage, 'User-Message');
 
     const userName = `Message_${uniqueSuffix()}`;
 
     try {
-      // 1. User registers (stays pending)
+      // 1. User registers (stays pending, on their own backend)
       await registerUser(userPage, userName);
 
       // 2. Wait for admin to see the registration card
@@ -300,6 +328,7 @@ test.describe.serial('Registration Approval Flow', () => {
       console.log('[Test] PASS - Admin received user reply');
     } finally {
       await userContext.close();
+      await backends.stop('user-message');
     }
   });
 });

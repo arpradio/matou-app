@@ -131,6 +131,106 @@ export async function getUserSpaces(aid: string): Promise<UserSpacesResponse> {
   return response.json();
 }
 
+export interface VerifyAccessResponse {
+  hasAccess: boolean;
+  spaceId?: string;
+  canRead: boolean;
+  canWrite: boolean;
+}
+
+/**
+ * Verify community space access for a user
+ */
+export async function verifyCommunityAccess(aid: string): Promise<VerifyAccessResponse> {
+  try {
+    const response = await fetch(
+      `${BACKEND_URL}/api/v1/spaces/community/verify-access?aid=${encodeURIComponent(aid)}`
+    );
+    if (!response.ok) return { hasAccess: false, canRead: false, canWrite: false };
+    return response.json();
+  } catch {
+    return { hasAccess: false, canRead: false, canWrite: false };
+  }
+}
+
+export interface JoinCommunityRequest {
+  userAid: string;
+  inviteKey: string;
+}
+
+/**
+ * Join the community space using an invite key
+ */
+export async function joinCommunity(req: JoinCommunityRequest): Promise<{ success: boolean; error?: string }> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/spaces/community/join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req),
+    });
+    return response.json();
+  } catch {
+    return { success: false, error: 'Network error' };
+  }
+}
+
+// --- Backend Identity (per-user mode) ---
+
+export interface SetBackendIdentityRequest {
+  aid: string;
+  mnemonic: string;
+  orgAid?: string;
+  communitySpaceId?: string;
+}
+
+export interface SetBackendIdentityResponse {
+  success: boolean;
+  peerId?: string;
+  privateSpaceId?: string;
+  error?: string;
+}
+
+export interface GetBackendIdentityResponse {
+  configured: boolean;
+  aid?: string;
+  peerId?: string;
+  orgAid?: string;
+  communitySpaceId?: string;
+  privateSpaceId?: string;
+}
+
+/**
+ * Set the backend identity (triggers peer key derivation, SDK restart, private space creation)
+ */
+export async function setBackendIdentity(
+  request: SetBackendIdentityRequest,
+): Promise<SetBackendIdentityResponse> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/identity/set`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(request),
+      signal: AbortSignal.timeout(30000),
+    });
+    return response.json();
+  } catch {
+    return { success: false, error: 'Network error' };
+  }
+}
+
+/**
+ * Get the current backend identity status
+ */
+export async function getBackendIdentity(): Promise<GetBackendIdentityResponse> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/identity`);
+    if (!response.ok) return { configured: false };
+    return response.json();
+  } catch {
+    return { configured: false };
+  }
+}
+
 export interface SendInviteEmailRequest {
   email: string;
   inviteCode: string;

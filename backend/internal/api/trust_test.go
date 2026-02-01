@@ -40,7 +40,7 @@ func TestNewTrustHandler(t *testing.T) {
 	store, cleanup := setupTrustTestStore(t)
 	defer cleanup()
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	if handler == nil {
 		t.Fatal("NewTrustHandler returned nil")
@@ -57,7 +57,7 @@ func TestHandleGetGraph_EmptyStore(t *testing.T) {
 	store, cleanup := setupTrustTestStore(t)
 	defer cleanup()
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/graph", nil)
 	w := httptest.NewRecorder()
@@ -110,7 +110,7 @@ func TestHandleGetGraph_WithCredentials(t *testing.T) {
 		},
 	})
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/graph", nil)
 	w := httptest.NewRecorder()
@@ -149,7 +149,7 @@ func TestHandleGetGraph_WithSummary(t *testing.T) {
 		},
 	})
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/graph?summary=true", nil)
 	w := httptest.NewRecorder()
@@ -205,7 +205,7 @@ func TestHandleGetGraph_WithAIDFilter(t *testing.T) {
 		},
 	})
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	// Request subgraph for User1 with depth 1
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/graph?aid=EUSER1&depth=1", nil)
@@ -229,7 +229,7 @@ func TestHandleGetGraph_MethodNotAllowed(t *testing.T) {
 	store, cleanup := setupTrustTestStore(t)
 	defer cleanup()
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trust/graph", nil)
 	w := httptest.NewRecorder()
@@ -258,7 +258,7 @@ func TestHandleGetScore(t *testing.T) {
 		},
 	})
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/score/EUSER1", nil)
 	w := httptest.NewRecorder()
@@ -291,7 +291,7 @@ func TestHandleGetScore_NotFound(t *testing.T) {
 	store, cleanup := setupTrustTestStore(t)
 	defer cleanup()
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/score/ENONEXISTENT", nil)
 	w := httptest.NewRecorder()
@@ -307,7 +307,7 @@ func TestHandleGetScore_MissingAID(t *testing.T) {
 	store, cleanup := setupTrustTestStore(t)
 	defer cleanup()
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/score/", nil)
 	w := httptest.NewRecorder()
@@ -358,7 +358,7 @@ func TestHandleGetScores(t *testing.T) {
 		},
 	})
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/scores?limit=10", nil)
 	w := httptest.NewRecorder()
@@ -409,7 +409,7 @@ func TestHandleGetScores_WithLimit(t *testing.T) {
 		})
 	}
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/scores?limit=3", nil)
 	w := httptest.NewRecorder()
@@ -472,7 +472,7 @@ func TestHandleGetSummary(t *testing.T) {
 		},
 	})
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/trust/summary", nil)
 	w := httptest.NewRecorder()
@@ -505,7 +505,7 @@ func TestHandleGetSummary_MethodNotAllowed(t *testing.T) {
 	store, cleanup := setupTrustTestStore(t)
 	defer cleanup()
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/trust/summary", nil)
 	w := httptest.NewRecorder()
@@ -521,7 +521,7 @@ func TestTrustHandler_RegisterRoutes(t *testing.T) {
 	store, cleanup := setupTrustTestStore(t)
 	defer cleanup()
 
-	handler := NewTrustHandler(store, "EORG123")
+	handler := NewTrustHandler(store, "EORG123", nil)
 	mux := http.NewServeMux()
 
 	handler.RegisterRoutes(mux)

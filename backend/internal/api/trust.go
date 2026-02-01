@@ -1,27 +1,32 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
 
+	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/anystore"
 	"github.com/matou-dao/backend/internal/trust"
 )
 
 // TrustHandler handles trust graph related HTTP requests
 type TrustHandler struct {
-	store      *anystore.LocalStore
-	orgAID     string
-	calculator *trust.Calculator
+	store        *anystore.LocalStore
+	orgAID       string
+	calculator   *trust.Calculator
+	spaceManager *anysync.SpaceManager
 }
 
 // NewTrustHandler creates a new trust handler
-func NewTrustHandler(store *anystore.LocalStore, orgAID string) *TrustHandler {
+func NewTrustHandler(store *anystore.LocalStore, orgAID string, spaceManager *anysync.SpaceManager) *TrustHandler {
 	return &TrustHandler{
-		store:      store,
-		orgAID:     orgAID,
-		calculator: trust.NewDefaultCalculator(),
+		store:        store,
+		orgAID:       orgAID,
+		calculator:   trust.NewDefaultCalculator(),
+		spaceManager: spaceManager,
 	}
 }
 
@@ -40,6 +45,50 @@ type ScoreResponse struct {
 type ScoresResponse struct {
 	Scores []*trust.Score `json:"scores"`
 	Total  int            `json:"total"`
+}
+
+// getCommunityCredentials fetches credentials from the AnySync community space
+// ObjectTree and converts them to CachedCredential format for the trust builder.
+func (h *TrustHandler) getCommunityCredentials(ctx context.Context) []*anystore.CachedCredential {
+	if h.spaceManager == nil {
+		return nil
+	}
+	communitySpaceID := h.spaceManager.GetCommunitySpaceID()
+	if communitySpaceID == "" {
+		return nil
+	}
+	treeMgr := h.spaceManager.CredentialTreeManager()
+	if treeMgr == nil {
+		return nil
+	}
+	creds, err := treeMgr.ReadCredentials(ctx, communitySpaceID)
+	if err != nil || len(creds) == 0 {
+		return nil
+	}
+	result := make([]*anystore.CachedCredential, 0, len(creds))
+	for _, cred := range creds {
+		var data interface{}
+		if cred.Data != nil {
+			json.Unmarshal(cred.Data, &data)
+		}
+		result = append(result, &anystore.CachedCredential{
+			ID:         cred.SAID,
+			IssuerAID:  cred.Issuer,
+			SubjectAID: cred.Recipient,
+			SchemaID:   cred.Schema,
+			Data:       data,
+		})
+	}
+	return result
+}
+
+// newBuilder creates a trust.Builder with AnySync community credentials injected.
+func (h *TrustHandler) newBuilder(ctx context.Context) *trust.Builder {
+	builder := trust.NewBuilder(h.store, h.orgAID)
+	if extras := h.getCommunityCredentials(ctx); len(extras) > 0 {
+		builder.WithExtraCredentials(extras)
+	}
+	return builder
 }
 
 // HandleGetGraph handles GET /api/v1/trust/graph
@@ -63,7 +112,7 @@ func (h *TrustHandler) HandleGetGraph(w http.ResponseWriter, r *http.Request) {
 	includeSummary := r.URL.Query().Get("summary") == "true"
 
 	// Create builder
-	builder := trust.NewBuilder(h.store, h.orgAID)
+	builder := h.newBuilder(ctx)
 
 	var graph *trust.Graph
 	var err error
@@ -127,7 +176,7 @@ func (h *TrustHandler) HandleGetScore(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	// Build graph
-	builder := trust.NewBuilder(h.store, h.orgAID)
+	builder := h.newBuilder(ctx)
 	graph, err := builder.Build(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -176,7 +225,7 @@ func (h *TrustHandler) HandleGetScores(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build graph
-	builder := trust.NewBuilder(h.store, h.orgAID)
+	builder := h.newBuilder(ctx)
 	graph, err := builder.Build(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -206,7 +255,7 @@ func (h *TrustHandler) HandleGetSummary(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 
 	// Build graph
-	builder := trust.NewBuilder(h.store, h.orgAID)
+	builder := h.newBuilder(ctx)
 	graph, err := builder.Build(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{

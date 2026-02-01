@@ -194,10 +194,31 @@ export function useAdminActions() {
         if (inviteResponse.ok) {
           const inviteResult = await inviteResponse.json() as {
             success: boolean;
-            privateSpaceId?: string;
             communitySpaceId?: string;
+            inviteKey?: string;
           };
-          console.log('[AdminActions] User invited to community space:', inviteResult);
+          console.log('[AdminActions] Invite generated:', inviteResult);
+
+          // Send space invite to user via KERI EXN
+          if (inviteResult.inviteKey) {
+            try {
+              await keriClient.sendEXN(
+                issuerAidName,
+                registration.applicantAid,
+                '/matou/space/invite',
+                {
+                  type: 'space_invite',
+                  spaceId: inviteResult.communitySpaceId,
+                  inviteKey: inviteResult.inviteKey,
+                  spaceName: 'MATOU Community',
+                  issuedAt: new Date().toISOString(),
+                }
+              );
+              console.log('[AdminActions] Space invite EXN sent to:', registration.applicantAid);
+            } catch (exnErr) {
+              console.warn('[AdminActions] Failed to send space invite EXN:', exnErr);
+            }
+          }
         } else {
           console.warn('[AdminActions] Space invitation failed:', await inviteResponse.text());
         }

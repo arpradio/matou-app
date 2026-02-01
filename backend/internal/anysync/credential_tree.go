@@ -189,6 +189,9 @@ func (m *CredentialTreeManager) GetTreeID(spaceID string) string {
 // discoverTree discovers and loads a credential tree from the space storage.
 // This is used when another peer created the tree and it was synced via tree nodes.
 func (m *CredentialTreeManager) discoverTree(ctx context.Context, spaceID string) error {
+	if m.client == nil {
+		return fmt.Errorf("no client configured")
+	}
 	space, err := m.client.GetSpace(ctx, spaceID)
 	if err != nil {
 		return fmt.Errorf("getting space: %w", err)

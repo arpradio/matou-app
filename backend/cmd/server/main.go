@@ -5,13 +5,16 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strconv"
 
 	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/anystore"
 	"github.com/matou-dao/backend/internal/api"
 	"github.com/matou-dao/backend/internal/config"
 	"github.com/matou-dao/backend/internal/email"
+	"github.com/matou-dao/backend/internal/identity"
 	"github.com/matou-dao/backend/internal/keri"
+	bgSync "github.com/matou-dao/backend/internal/sync"
 )
 
 func main() {
@@ -43,6 +46,13 @@ func main() {
 		cfg.Server.Port = 9080
 	}
 
+	// Allow port override from environment (used by Electron to allocate dynamic ports)
+	if portStr := os.Getenv("MATOU_SERVER_PORT"); portStr != "" {
+		if port, parseErr := strconv.Atoi(portStr); parseErr == nil {
+			cfg.Server.Port = port
+		}
+	}
+
 	fmt.Printf("  Configuration loaded\n")
 	fmt.Printf("   Organization: %s\n", cfg.Bootstrap.Organization.Name)
 	fmt.Printf("   Org AID: %s\n", cfg.GetOrgAID())
@@ -62,6 +72,18 @@ func main() {
 		log.Fatalf("Failed to create data directory: %v", err)
 	}
 
+	// Initialize user identity (per-user mode)
+	fmt.Println("Initializing user identity...")
+	userIdentity := identity.New(dataDir)
+	if userIdentity.IsConfigured() {
+		fmt.Printf("  Identity loaded from disk\n")
+		fmt.Printf("   AID: %s\n", userIdentity.GetAID())
+		fmt.Printf("   Peer ID: %s\n", userIdentity.GetPeerID())
+	} else {
+		fmt.Println("  No identity configured yet (will be set via /api/v1/identity/set)")
+	}
+	fmt.Println()
+
 	// Initialize any-sync client
 	fmt.Println("Initializing any-sync client...")
 
@@ -76,35 +98,22 @@ func main() {
 		}
 	}
 
-	// Check if full SDK mode is enabled
-	// MATOU_ANYSYNC_MODE=sdk enables full network connectivity
-	// Default is "local" mode which stores data locally without network sync
-	anysyncMode := os.Getenv("MATOU_ANYSYNC_MODE")
-
-	var anysyncClient anysync.AnySyncClient
-	if anysyncMode == "sdk" {
-		fmt.Println("  Mode: Full SDK (network sync enabled)")
-		sdkClient, err := anysync.NewSDKClient(anysyncConfigPath, &anysync.ClientOptions{
-			DataDir:     dataDir,
-			PeerKeyPath: dataDir + "/peer.key",
-		})
-		if err != nil {
-			log.Fatalf("Failed to create any-sync SDK client: %v", err)
-		}
-		anysyncClient = sdkClient
-		defer sdkClient.Close()
-	} else {
-		fmt.Println("  Mode: Local (network sync disabled)")
-		localClient, err := anysync.NewClient(anysyncConfigPath, &anysync.ClientOptions{
-			DataDir:     dataDir,
-			PeerKeyPath: dataDir + "/peer.key",
-		})
-		if err != nil {
-			log.Fatalf("Failed to create any-sync client: %v", err)
-		}
-		anysyncClient = localClient
-		defer localClient.Close()
+	// If identity is persisted with mnemonic, derive peer key for SDK initialization
+	sdkOpts := &anysync.ClientOptions{
+		DataDir:     dataDir,
+		PeerKeyPath: dataDir + "/peer.key",
 	}
+	if userIdentity.IsConfigured() {
+		sdkOpts.Mnemonic = userIdentity.GetMnemonic()
+		fmt.Println("  Using mnemonic-derived peer key from persisted identity")
+	}
+
+	sdkClient, err := anysync.NewSDKClient(anysyncConfigPath, sdkOpts)
+	if err != nil {
+		log.Fatalf("Failed to create any-sync SDK client: %v", err)
+	}
+	var anysyncClient anysync.AnySyncClient = sdkClient
+	defer sdkClient.Close()
 
 	fmt.Printf("  any-sync client initialized\n")
 	fmt.Printf("   Network ID: %s\n", anysyncClient.GetNetworkID())
@@ -125,21 +134,31 @@ func main() {
 	fmt.Printf("   Data directory: %s\n", dataDir)
 	fmt.Println()
 
+	// Determine community space ID: prefer runtime config from identity, fall back to bootstrap
+	communitySpaceID := cfg.GetOrgSpaceID()
+	orgAID := cfg.GetOrgAID()
+	if userIdentity.GetCommunitySpaceID() != "" {
+		communitySpaceID = userIdentity.GetCommunitySpaceID()
+	}
+	if userIdentity.GetOrgAID() != "" {
+		orgAID = userIdentity.GetOrgAID()
+	}
+
 	// Initialize space manager
 	fmt.Println("Initializing space manager...")
 	spaceManager := anysync.NewSpaceManager(anysyncClient, &anysync.SpaceManagerConfig{
-		CommunitySpaceID: cfg.GetOrgSpaceID(),
-		OrgAID:           cfg.GetOrgAID(),
+		CommunitySpaceID: communitySpaceID,
+		OrgAID:           orgAID,
 	})
 	spaceStore := anystore.NewSpaceStoreAdapter(store)
 
 	fmt.Printf("  Space manager initialized\n")
-	fmt.Printf("   Community Space ID: %s\n", cfg.GetOrgSpaceID())
+	fmt.Printf("   Community Space ID: %s\n", communitySpaceID)
 	fmt.Println()
 
 	// Verify community space (log warning if not configured)
-	if cfg.GetOrgSpaceID() == "" {
-		fmt.Println("  ⚠️  Warning: Community space ID not configured")
+	if communitySpaceID == "" {
+		fmt.Println("  Warning: Community space ID not configured")
 		fmt.Println("     Memberships will only be stored in private spaces")
 	}
 
@@ -158,14 +177,19 @@ func main() {
 	fmt.Printf("   Note: Credential issuance handled by frontend (signify-ts)\n")
 	fmt.Println()
 
+	// Create event broker for SSE
+	eventBroker := api.NewEventBroker()
+
 	// Create API handlers
 	credHandler := api.NewCredentialsHandler(keriClient, store)
-	syncHandler := api.NewSyncHandler(keriClient, store, spaceManager, spaceStore)
-	trustHandler := api.NewTrustHandler(store, cfg.GetOrgAID())
+	syncHandler := api.NewSyncHandler(keriClient, store, spaceManager, spaceStore, userIdentity)
+	trustHandler := api.NewTrustHandler(store, cfg.GetOrgAID(), spaceManager)
 	healthHandler := api.NewHealthHandler(store, spaceStore, cfg.GetOrgAID(), cfg.GetAdminAID())
-	spacesHandler := api.NewSpacesHandler(spaceManager, store)
+	spacesHandler := api.NewSpacesHandler(spaceManager, store, userIdentity)
 	emailSender := email.NewSender(cfg.SMTP)
 	invitesHandler := api.NewInvitesHandler(emailSender)
+	identityHandler := api.NewIdentityHandler(userIdentity, sdkClient, spaceManager, spaceStore)
+	eventsHandler := api.NewEventsHandler(eventBroker)
 
 	// Create HTTP server
 	mux := http.NewServeMux()
@@ -208,6 +232,8 @@ func main() {
 	trustHandler.RegisterRoutes(mux)
 	spacesHandler.RegisterRoutes(mux)
 	invitesHandler.RegisterRoutes(mux)
+	identityHandler.RegisterRoutes(mux)
+	eventsHandler.RegisterRoutes(mux)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -217,6 +243,11 @@ func main() {
 	fmt.Println("  GET  /health                       - Health check")
 	fmt.Println("  GET  /info                         - System information")
 	fmt.Println()
+	fmt.Println("  Identity (per-user mode):")
+	fmt.Println("  POST /api/v1/identity/set          - Set user identity (triggers SDK restart)")
+	fmt.Println("  GET  /api/v1/identity              - Get current identity status")
+	fmt.Println("  DELETE /api/v1/identity             - Clear identity (logout/reset)")
+	fmt.Println()
 	fmt.Println("  Credentials:")
 	fmt.Println("  GET  /api/v1/org                   - Organization info for frontend")
 	fmt.Println("  GET  /api/v1/credentials           - List stored credentials")
@@ -225,27 +256,39 @@ func main() {
 	fmt.Println("  POST /api/v1/credentials/validate  - Validate credential structure")
 	fmt.Println("  GET  /api/v1/credentials/roles     - List available roles")
 	fmt.Println()
-	fmt.Println("  Sync (Week 3):")
+	fmt.Println("  Sync:")
 	fmt.Println("  POST /api/v1/sync/credentials      - Sync credentials from KERIA")
 	fmt.Println("  POST /api/v1/sync/kel              - Sync KEL from KERIA")
 	fmt.Println("  GET  /api/v1/community/members     - List community members")
 	fmt.Println("  GET  /api/v1/community/credentials - List community-visible credentials")
 	fmt.Println()
-	fmt.Println("  Trust Graph (Week 3):")
+	fmt.Println("  Trust Graph:")
 	fmt.Println("  GET  /api/v1/trust/graph           - Get trust graph (full or filtered)")
 	fmt.Println("  GET  /api/v1/trust/score/{aid}     - Get trust score for an AID")
 	fmt.Println("  GET  /api/v1/trust/scores          - Get top trust scores")
 	fmt.Println("  GET  /api/v1/trust/summary         - Get trust graph summary")
 	fmt.Println()
 	fmt.Println("  Spaces (any-sync):")
-	fmt.Println("  POST /api/v1/spaces/community         - Create community space")
-	fmt.Println("  GET  /api/v1/spaces/community         - Get community space info")
-	fmt.Println("  POST /api/v1/spaces/private           - Create private space")
-	fmt.Println("  POST /api/v1/spaces/community/invite  - Invite user to community")
+	fmt.Println("  POST /api/v1/spaces/community                - Create community space")
+	fmt.Println("  GET  /api/v1/spaces/community                - Get community space info")
+	fmt.Println("  POST /api/v1/spaces/private                  - Create private space")
+	fmt.Println("  POST /api/v1/spaces/community/invite         - Generate invite for user")
+	fmt.Println("  POST /api/v1/spaces/community/join           - Join community with invite key")
+	fmt.Println("  GET  /api/v1/spaces/community/verify-access  - Verify community access")
 	fmt.Println()
 	fmt.Println("  Invites:")
 	fmt.Println("  POST /api/v1/invites/send-email       - Email invite code to user")
 	fmt.Println()
+	fmt.Println("  Events:")
+	fmt.Println("  GET  /api/v1/events                   - SSE event stream")
+	fmt.Println()
+
+	// Start background sync worker
+	syncWorkerConfig := bgSync.DefaultConfig()
+	syncWorkerConfig.CommunitySpaceID = communitySpaceID
+	syncWorker := bgSync.NewWorker(syncWorkerConfig, spaceManager, store, eventBroker)
+	syncWorker.Start()
+	defer syncWorker.Stop()
 
 	// Wrap with CORS middleware
 	handler := api.CORSMiddleware(mux)

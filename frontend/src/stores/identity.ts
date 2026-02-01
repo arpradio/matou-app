@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed } from 'vue';
 import { KERIClient, useKERIClient, type AIDInfo } from 'src/lib/keri/client';
-import { getUserSpaces } from 'src/lib/api/client';
+import { getUserSpaces, verifyCommunityAccess as apiVerifyCommunityAccess, joinCommunity as apiJoinCommunity } from 'src/lib/api/client';
 
 export interface RestoreResult {
   success: boolean;
@@ -24,6 +24,8 @@ export const useIdentityStore = defineStore('identity', () => {
   const privateKeysAvailable = ref(false);
   const communityKeysAvailable = ref(false);
   const spacesLoaded = ref(false);
+  const communityAccessVerified = ref(false);
+  const communityAccessChecking = ref(false);
 
   // Computed
   const hasIdentity = computed(() => currentAID.value !== null);
@@ -121,6 +123,7 @@ export const useIdentityStore = defineStore('identity', () => {
     passcode.value = null;
     isConnected.value = false;
     localStorage.removeItem('matou_passcode');
+    localStorage.removeItem('matou_mnemonic');
   }
 
   async function fetchUserSpaces(): Promise<void> {
@@ -140,6 +143,37 @@ export const useIdentityStore = defineStore('identity', () => {
       });
     } catch (err) {
       console.warn('[IdentityStore] Failed to fetch user spaces:', err);
+    }
+  }
+
+  async function verifyCommunityAccess(): Promise<boolean> {
+    if (!currentAID.value?.prefix) return false;
+    communityAccessChecking.value = true;
+    try {
+      const result = await apiVerifyCommunityAccess(currentAID.value.prefix);
+      communityAccessVerified.value = result.hasAccess;
+      if (result.spaceId) communitySpaceId.value = result.spaceId;
+      return result.hasAccess;
+    } catch {
+      return false;
+    } finally {
+      communityAccessChecking.value = false;
+    }
+  }
+
+  async function joinCommunitySpace(inviteKey: string): Promise<boolean> {
+    if (!currentAID.value?.prefix) return false;
+    try {
+      const result = await apiJoinCommunity({
+        userAid: currentAID.value.prefix,
+        inviteKey,
+      });
+      if (result.success) {
+        communityAccessVerified.value = true;
+      }
+      return result.success;
+    } catch {
+      return false;
     }
   }
 
@@ -164,6 +198,8 @@ export const useIdentityStore = defineStore('identity', () => {
     privateKeysAvailable,
     communityKeysAvailable,
     spacesLoaded,
+    communityAccessVerified,
+    communityAccessChecking,
 
     // Computed
     hasIdentity,
@@ -179,5 +215,7 @@ export const useIdentityStore = defineStore('identity', () => {
     setInitError,
     setCurrentAID,
     fetchUserSpaces,
+    verifyCommunityAccess,
+    joinCommunitySpace,
   };
 });

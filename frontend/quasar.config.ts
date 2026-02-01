@@ -83,7 +83,23 @@ export default configure(() => {
     electron: {
       preloadScripts: ['electron-preload'],
       inspectPort: 5858,
-      bundler: 'packager',
+      bundler: 'builder',
+      builder: {
+        appId: 'org.matou.identity',
+        productName: 'Matou Identity',
+        extraResources: [
+          { from: '../backend/bin/', to: 'backend/' },
+        ],
+        mac: {
+          target: 'dmg',
+        },
+        linux: {
+          target: 'AppImage',
+        },
+        win: {
+          target: 'nsis',
+        },
+      },
     },
 
     bex: {

@@ -7,7 +7,8 @@ import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
 import { useOnboardingStore } from 'stores/onboarding';
 import { fetchOrgConfig } from 'src/api/config';
-import { BACKEND_URL } from 'src/lib/api/client';
+import { setBackendIdentity } from 'src/lib/api/client';
+import { useAppStore } from 'stores/app';
 
 export interface RegistrationData {
   name: string;
@@ -122,32 +123,30 @@ export function useRegistration() {
       registrationSent.value = true;
       console.log('[Registration] Registration submitted successfully');
 
-      // Step 5: Create private space (non-blocking)
+      // Step 5: Set backend identity (derives peer key, restarts SDK, creates private space)
       try {
         const mnemonicWords = onboardingStore.mnemonic.words;
-        const spaceBody: Record<string, string> = {
-          userAid: currentAID.prefix,
-        };
         if (mnemonicWords.length > 0) {
-          spaceBody.mnemonic = mnemonicWords.join(' ');
-        }
+          const mnemonicStr = mnemonicWords.join(' ');
+          localStorage.setItem('matou_mnemonic', mnemonicStr);
 
-        const spaceResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/private`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(spaceBody),
-          signal: AbortSignal.timeout(10000),
-        });
-
-        if (spaceResponse.ok) {
-          const spaceResult = await spaceResponse.json() as { spaceId: string; created: boolean };
-          console.log('[Registration] Private space created:', spaceResult.spaceId, spaceResult.created ? '(new)' : '(existing)');
-        } else {
-          console.warn('[Registration] Private space creation failed:', await spaceResponse.text());
+          const appStore = useAppStore();
+          const identityResult = await setBackendIdentity({
+            aid: currentAID.prefix,
+            mnemonic: mnemonicStr,
+            orgAid: appStore.orgAid ?? undefined,
+            communitySpaceId: undefined, // assigned after community join
+          });
+          if (identityResult.success) {
+            console.log('[Registration] Backend identity set, peer:', identityResult.peerId,
+              'private space:', identityResult.privateSpaceId);
+          } else {
+            console.warn('[Registration] Backend identity set failed:', identityResult.error);
+          }
         }
       } catch (err) {
-        // Non-fatal - space can be created later when credentials are synced
-        console.warn('[Registration] Private space creation deferred:', err);
+        // Non-fatal - identity can be set later
+        console.warn('[Registration] Backend identity configuration deferred:', err);
       }
 
       return true;

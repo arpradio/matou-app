@@ -165,7 +165,7 @@ const serviceGroups: Record<string, { services: string[]; label: string; startCm
   },
   backend: {
     services: ['backend'],
-    label: 'Backend server in test mode',
+    label: 'Backend server in test mode (admin instance on port 9080)',
     startCmd: 'cd backend && MATOU_ENV=test go run ./cmd/server',
   },
 };

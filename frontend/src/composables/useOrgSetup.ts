@@ -9,7 +9,7 @@ import { KERIClient, useKERIClient } from 'src/lib/keri/client';
 import { saveOrgConfig, type OrgConfig } from 'src/api/config';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useIdentityStore } from 'stores/identity';
-import { BACKEND_URL } from 'src/lib/api/client';
+import { BACKEND_URL, setBackendIdentity } from 'src/lib/api/client';
 
 export interface OrgSetupConfig {
   orgName: string;
@@ -144,10 +144,34 @@ export function useOrgSetup() {
         console.log('[OrgSetup] Using fallback admin OOBI URL:', adminOobi);
       }
 
-      // Step 9: Create spaces in any-sync
-      progress.value = 'Creating spaces...';
-      let communitySpaceId: string | undefined;
+      // Step 9: Set backend identity (derives peer key from mnemonic, restarts SDK, auto-creates private space)
+      // This MUST happen before community space creation so the mnemonic-derived
+      // peer key is active and the backend can derive community space keys from it.
+      progress.value = 'Configuring backend identity...';
       let adminPrivateSpaceId: string | undefined;
+
+      try {
+        const identityResult = await setBackendIdentity({
+          aid: adminAid.prefix,
+          mnemonic: mnemonic,
+          orgAid: orgAid.prefix,
+        });
+        if (identityResult.success) {
+          adminPrivateSpaceId = identityResult.privateSpaceId;
+          console.log('[OrgSetup] Backend identity set, peer:', identityResult.peerId,
+            'private space:', identityResult.privateSpaceId);
+        } else {
+          console.warn('[OrgSetup] Backend identity set failed:', identityResult.error);
+        }
+      } catch (err) {
+        console.warn('[OrgSetup] Backend identity configuration deferred:', err);
+      }
+
+      // Step 10: Create community space in any-sync
+      // Now that identity is set, the backend derives community space keys from the
+      // stored mnemonic (DeriveSpaceKeySet index 1), making the admin the recoverable owner.
+      progress.value = 'Creating community space...';
+      let communitySpaceId: string | undefined;
 
       try {
         const spaceResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/community`, {
@@ -164,6 +188,14 @@ export function useOrgSetup() {
           const spaceResult = await spaceResponse.json() as { spaceId: string; success: boolean };
           communitySpaceId = spaceResult.spaceId;
           console.log('[OrgSetup] Created community space:', spaceResult.spaceId);
+
+          // Update backend identity with the community space ID
+          await setBackendIdentity({
+            aid: adminAid.prefix,
+            mnemonic: mnemonic,
+            orgAid: orgAid.prefix,
+            communitySpaceId,
+          });
         } else {
           console.warn('[OrgSetup] Failed to create community space:', await spaceResponse.text());
         }
@@ -172,31 +204,7 @@ export function useOrgSetup() {
         console.warn('[OrgSetup] Community space creation deferred:', err);
       }
 
-      // Step 9b: Create admin private space with mnemonic-derived keys
-      progress.value = 'Creating admin private space...';
-      try {
-        const privateResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/private`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            userAid: adminAid.prefix,
-            mnemonic: mnemonic,
-          }),
-          signal: AbortSignal.timeout(10000),
-        });
-        if (privateResponse.ok) {
-          const privateResult = await privateResponse.json();
-          adminPrivateSpaceId = privateResult.spaceId;
-          console.log('[OrgSetup] Created admin private space:', privateResult.spaceId,
-            privateResult.created ? '(new)' : '(existing)');
-        } else {
-          console.warn('[OrgSetup] Failed to create admin private space:', await privateResponse.text());
-        }
-      } catch (err) {
-        console.warn('[OrgSetup] Admin private space creation deferred:', err);
-      }
-
-      // Step 10: Save config to server (single save with space IDs included)
+      // Step 11: Save config to server (single save with space IDs included)
       progress.value = 'Saving configuration...';
       const orgConfig: OrgConfig = {
         organization: {
@@ -227,8 +235,9 @@ export function useOrgSetup() {
       await saveOrgConfig(orgConfig);
       console.log('[OrgSetup] Config saved to server');
 
-      // Step 11: Store admin passcode in localStorage
+      // Step 12: Store admin passcode and mnemonic in localStorage
       localStorage.setItem('matou_passcode', adminPasscode);
+      localStorage.setItem('matou_mnemonic', mnemonic);
       localStorage.setItem('matou_admin_aid', adminAid.prefix);
       localStorage.setItem('matou_org_aid', orgAid.prefix);
       console.log('[OrgSetup] Credentials stored in localStorage');

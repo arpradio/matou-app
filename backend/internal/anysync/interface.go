@@ -10,8 +10,7 @@ import (
 	"github.com/anyproto/any-sync/util/crypto"
 )
 
-// AnySyncClient is the common interface implemented by both
-// Client (local mode) and SDKClient (full network mode)
+// AnySyncClient is the common interface implemented by SDKClient.
 type AnySyncClient interface {
 	// CreateSpace creates a new space
 	CreateSpace(ctx context.Context, ownerAID string, spaceType string, signingKey crypto.PrivKey) (*SpaceCreateResult, error)
@@ -31,7 +30,8 @@ type AnySyncClient interface {
 	// DeriveSpaceID returns the deterministic space ID without creating
 	DeriveSpaceID(ctx context.Context, ownerAID string, spaceType string, signingKey crypto.PrivKey) (string, error)
 
-	// AddToACL adds a peer to a space's access control list
+	// Deprecated: AddToACL builds raw JSON as a proto record which is rejected
+	// by the consensus node. Use MatouACLManager.CreateOpenInvite/JoinWithInvite instead.
 	AddToACL(ctx context.Context, spaceID string, peerID string, permissions []string) error
 
 	// SyncDocument syncs a document to a space

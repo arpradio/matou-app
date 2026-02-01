@@ -79,6 +79,10 @@ func (m *mockSyncAnySyncClient) GetSpace(ctx context.Context, spaceID string) (c
 	return nil, fmt.Errorf("mock: GetSpace not supported")
 }
 
+func (m *mockSyncAnySyncClient) MakeSpaceShareable(ctx context.Context, spaceID string) error {
+	return nil
+}
+
 func setupSyncTestHandler(t *testing.T) (*SyncHandler, *anystore.LocalStore, func()) {
 	// Create temp directory for test database
 	tmpDir, err := os.MkdirTemp("", "sync_test")
@@ -121,7 +125,7 @@ func setupSyncTestHandler(t *testing.T) (*SyncHandler, *anystore.LocalStore, fun
 		os.RemoveAll(tmpDir)
 	}
 
-	return NewSyncHandler(keriClient, store, spaceManager, spaceStore), store, cleanup
+	return NewSyncHandler(keriClient, store, spaceManager, spaceStore, nil), store, cleanup
 }
 
 // ============================================
@@ -254,8 +258,9 @@ func TestHandleSyncCredentials_MissingUserAID(t *testing.T) {
 
 	handler.HandleSyncCredentials(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	// 409 Conflict: identity not configured (no userAid in body and no userIdentity set)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected status %d, got %d", http.StatusConflict, w.Code)
 	}
 
 	var resp SyncCredentialsResponse
@@ -482,8 +487,9 @@ func TestHandleSyncKEL_MissingUserAID(t *testing.T) {
 
 	handler.HandleSyncKEL(w, req)
 
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	// 409 Conflict: identity not configured (no userAid in body and no userIdentity set)
+	if w.Code != http.StatusConflict {
+		t.Errorf("expected status %d, got %d", http.StatusConflict, w.Code)
 	}
 
 	var resp SyncKELResponse

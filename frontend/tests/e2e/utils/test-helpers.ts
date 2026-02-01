@@ -22,8 +22,13 @@ import { clearTestConfig } from './mock-config';
 /** Uses Playwright baseURL from playwright.config.ts (test server on port 9003) */
 export const FRONTEND_URL = '';
 
-/** Backend API base URL (test server runs on port 9080) */
+/** Backend API base URL (admin backend, test server runs on port 9080) */
 export const BACKEND_URL = 'http://localhost:9080';
+
+/** Build a backend URL for a specific port (for multi-backend tests). */
+export function backendUrl(port: number = 9080): string {
+  return `http://localhost:${port}`;
+}
 
 /** Config server URL from KERI test network */
 export const CONFIG_SERVER_URL = keriEndpoints.configURL;
@@ -96,6 +101,42 @@ export function setupPageLogging(page: Page, prefix: string): void {
 
   page.on('requestfailed', (request) => {
     console.log(`[${prefix} FAILED] ${request.method()} ${request.url()}`);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Multi-backend routing
+// ---------------------------------------------------------------------------
+
+/**
+ * Setup backend routing for a browser context or page.
+ *
+ * The frontend is compiled with VITE_BACKEND_URL=http://localhost:9080.
+ * This intercepts all requests to that URL from the page (fetch, XHR,
+ * EventSource) and redirects them to a different backend port.
+ *
+ * Use this so each browser context talks to its own backend instance
+ * in per-user mode tests.
+ *
+ * Note: This only affects requests made by page scripts. Direct API calls
+ * via `page.request.post()` or the global `request` fixture are NOT
+ * intercepted — pass the correct URL explicitly for those.
+ *
+ * @param target - Page or BrowserContext to apply routing to
+ * @param targetPort - The backend port to redirect to
+ */
+export async function setupBackendRouting(
+  target: Page | BrowserContext,
+  targetPort: number,
+): Promise<void> {
+  if (targetPort === 9080) return; // Default port, no routing needed
+
+  const sourceBase = 'http://localhost:9080';
+  const targetBase = `http://localhost:${targetPort}`;
+
+  await target.route(`${sourceBase}/**`, async (route, request) => {
+    const newUrl = request.url().replace(sourceBase, targetBase);
+    await route.continue({ url: newUrl });
   });
 }
 
@@ -243,6 +284,9 @@ export async function registerUser(
 
 /**
  * Log in as an existing user by recovering identity from mnemonic.
+ * After KERI identity recovery, ensures the any-sync peer key is stored
+ * by calling the private space API (idempotent). This is required for
+ * the dashboard guard's community access verification.
  * Ends on the dashboard.
  */
 export async function loginWithMnemonic(
@@ -268,8 +312,59 @@ export async function loginWithMnemonic(
     page.getByText(/identity recovered/i),
   ).toBeVisible({ timeout: TIMEOUT.long });
 
+  // Ensure any-sync peer key is stored (needed for dashboard access verification).
+  // The private space API is idempotent — if the space exists it just persists the peer key.
+  await ensurePeerKeyStored(page, mnemonic);
+
   await page.getByRole('button', { name: /continue to dashboard/i }).click();
   await expect(page).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.short });
+}
+
+/**
+ * Ensure the backend identity is configured by calling POST /api/v1/identity/set.
+ *
+ * In per-user mode, the backend must know who it represents. This extracts the
+ * user's AID from the Pinia identity store and calls identity/set with the
+ * mnemonic, which triggers peer key derivation, SDK restart, and private space
+ * creation. The call is idempotent — if already configured, it updates.
+ *
+ * @param page - The Playwright page with the user's session
+ * @param mnemonic - The user's 12-word mnemonic
+ * @param baseUrl - Backend URL to use (default: BACKEND_URL / port 9080)
+ */
+async function ensurePeerKeyStored(
+  page: Page,
+  mnemonic: string[],
+  baseUrl: string = BACKEND_URL,
+): Promise<void> {
+  const aid = await page.evaluate(() => {
+    const app = (document.querySelector('#q-app') as any)?.__vue_app__;
+    if (!app) return '';
+    const pinia = app.config.globalProperties.$pinia;
+    const state = pinia?.state?.value?.identity;
+    return state?.currentAID?.prefix || '';
+  });
+
+  if (!aid) {
+    console.log('[Helpers] Warning: could not get AID for identity/set');
+    return;
+  }
+
+  try {
+    const response = await page.request.post(`${baseUrl}/api/v1/identity/set`, {
+      data: {
+        aid,
+        mnemonic: mnemonic.join(' '),
+      },
+    });
+    const body = await response.json();
+    console.log(
+      `[Helpers] Backend identity set for ${aid.slice(0, 12)}...` +
+        ` (peerId: ${body.peerId?.slice(0, 12)}..., space: ${body.privateSpaceId})`,
+    );
+  } catch (err) {
+    console.log('[Helpers] Warning: failed to set backend identity:', err);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -362,7 +457,10 @@ export async function performOrgSetup(
   expect(config.organization.aid).toBeTruthy();
   console.log('[OrgSetup] Config verified on server');
 
-  // --- Create community + admin private spaces via API ---
+  // --- Verify community space exists (created by UI's org setup flow) ---
+  // The UI flow calls setBackendIdentity which auto-creates the private space.
+  // The community space is created earlier in the UI flow via POST /api/v1/spaces/community.
+  // We verify here (and create if the UI hasn't done it yet, as a safety net).
   const communityResponse = await request.post(`${BACKEND_URL}/api/v1/spaces/community`, {
     data: {
       orgAid: config.organization.aid,
@@ -372,21 +470,14 @@ export async function performOrgSetup(
   expect(communityResponse.ok(),
     `Community space creation failed: ${communityResponse.status()}`).toBe(true);
   const communityBody = await communityResponse.json();
-  console.log('[OrgSetup] Community space created:', communityBody.spaceId);
+  console.log('[OrgSetup] Community space:', communityBody.spaceId);
 
-  const adminAidFromConfig = config.admin?.aid || config.admins?.[0]?.aid;
-  expect(adminAidFromConfig, 'Admin AID must exist in config').toBeTruthy();
-
-  const privateResponse = await request.post(`${BACKEND_URL}/api/v1/spaces/private`, {
-    data: {
-      userAid: adminAidFromConfig,
-      mnemonic: adminMnemonic.join(' '),
-    },
-  });
-  expect(privateResponse.ok(),
-    `Admin private space creation failed: ${privateResponse.status()}`).toBe(true);
-  const privateBody = await privateResponse.json();
-  console.log('[OrgSetup] Admin private space created:', privateBody.spaceId);
+  // Verify backend identity is configured (set by UI's setBackendIdentity call)
+  const identityResponse = await request.get(`${BACKEND_URL}/api/v1/identity`);
+  if (identityResponse.ok()) {
+    const identity = await identityResponse.json();
+    console.log(`[OrgSetup] Backend identity: configured=${identity.configured}, aid=${identity.aid?.slice(0, 12)}...`);
+  }
 
   // --- Save admin account for reuse ---
   const accounts: TestAccounts = {

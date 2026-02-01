@@ -49,6 +49,11 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
   const credential = ref<any | null>(null);
   const consecutiveErrors = ref(0);
 
+  // Space invite state
+  const spaceInviteReceived = ref(false);
+  const spaceInviteKey = ref<string | null>(null);
+  const spaceId = ref<string | null>(null);
+
   // Rejection and message state
   const rejectionReceived = ref(false);
   const rejectionInfo = ref<RejectionInfo | null>(null);
@@ -247,6 +252,25 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
           await client.notifications().mark(msgNotification.i);
         } catch (msgErr) {
           console.warn('[CredentialPolling] Failed to fetch message:', msgErr);
+        }
+      }
+
+      // Check for space invite notifications
+      const spaceInvites = notifications.notes?.filter(
+        (n: IPEXNotification) => n.a?.r === '/exn/matou/space/invite' && !n.r
+      ) ?? [];
+
+      if (spaceInvites.length > 0 && !spaceInviteReceived.value) {
+        try {
+          const inviteExn = await client.exchanges().get(spaceInvites[0].a.d);
+          const payload = inviteExn.exn.a || {};
+          spaceInviteReceived.value = true;
+          spaceInviteKey.value = payload.inviteKey as string;
+          spaceId.value = payload.spaceId as string;
+          await client.notifications().mark(spaceInvites[0].i);
+          console.log('[CredentialPolling] Space invite received');
+        } catch (inviteErr) {
+          console.warn('[CredentialPolling] Failed to fetch space invite:', inviteErr);
         }
       }
 
@@ -495,6 +519,9 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     grantReceived,
     credentialReceived,
     credential,
+    spaceInviteReceived,
+    spaceInviteKey,
+    spaceId,
     rejectionReceived,
     rejectionInfo,
     adminMessages,

@@ -9,6 +9,21 @@
 build:
 	go build -o bin/server ./cmd/server
 
+# Cross-platform builds for Electron packaging
+build-darwin-arm64:
+	GOOS=darwin GOARCH=arm64 go build -o bin/darwin-arm64/matou-backend ./cmd/server
+
+build-darwin-amd64:
+	GOOS=darwin GOARCH=amd64 go build -o bin/darwin-amd64/matou-backend ./cmd/server
+
+build-linux-amd64:
+	GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/matou-backend ./cmd/server
+
+build-windows-amd64:
+	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/matou-backend.exe ./cmd/server
+
+build-all: build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-windows-amd64
+
 run: build
 	./bin/server
 
@@ -98,6 +113,7 @@ help:
 	@echo ""
 	@echo "Build:"
 	@echo "  make build              - Build the server binary"
+	@echo "  make build-all          - Cross-compile for all platforms (Electron packaging)"
 	@echo "  make run                - Build and run the server"
 	@echo "  make run-test           - Run server in test mode (isolated data)"
 	@echo ""
@@ -123,6 +139,7 @@ help:
 	@echo "Cleanup:"
 	@echo "  make clean              - Remove build artifacts"
 
-.PHONY: build run run-test test test-coverage test-integration test-integration-keep test-all \
+.PHONY: build build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-windows-amd64 build-all \
+        run run-test test test-coverage test-integration test-integration-keep test-all \
         testnet-up testnet-down testnet-clean testnet-status testnet-health \
         lint fmt vet clean help

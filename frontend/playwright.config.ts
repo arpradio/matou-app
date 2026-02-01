@@ -52,6 +52,12 @@ export default defineConfig({
       testMatch: /e2e-invitation\.spec\.ts/,
       use: browserConfig,
     },
+    // Multi-backend infrastructure smoke test
+    {
+      name: 'multi-backend',
+      testMatch: /e2e-multi-backend\.spec\.ts/,
+      use: browserConfig,
+    },
     // Recovery & error handling - independent
     {
       name: 'recovery-errors',

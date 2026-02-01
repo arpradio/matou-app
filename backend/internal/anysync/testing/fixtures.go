@@ -50,9 +50,9 @@ var TestSchemas = struct {
 	Invitation: "EInvitationSchemaV1",
 }
 
-// NewTestClient creates an anysync.Client configured for testing.
+// NewTestClient creates a mock AnySyncClient configured for testing.
 // It creates a temporary directory that is cleaned up after the test.
-func NewTestClient(t *testing.T) (*anysync.Client, func()) {
+func NewTestClient(t *testing.T) (*MockAnySyncClient, func()) {
 	t.Helper()
 
 	tmpDir, err := os.MkdirTemp("", "anysync_test_*")
@@ -60,38 +60,11 @@ func NewTestClient(t *testing.T) (*anysync.Client, func()) {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 
-	// Create a minimal client config
-	configPath := filepath.Join(tmpDir, "client.yml")
-	configContent := `id: test-client
-networkId: N4N6KzfYtNRNnC2LNDLjMtFik7846EPqLgi1PANKwpaAMGKF
-nodes:
-  - peerId: 12D3KooWTestCoordinator
-    addresses:
-      - localhost:1004
-    types:
-      - coordinator
-  - peerId: 12D3KooWTestTreeNode
-    addresses:
-      - localhost:1001
-    types:
-      - tree
-`
-	if err := os.WriteFile(configPath, []byte(configContent), 0644); err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to write config: %v", err)
-	}
-
-	client, err := anysync.NewClient(configPath, &anysync.ClientOptions{
-		DataDir:     tmpDir,
-		PeerKeyPath: filepath.Join(tmpDir, "peer.key"),
-	})
-	if err != nil {
-		os.RemoveAll(tmpDir)
-		t.Fatalf("failed to create client: %v", err)
-	}
+	client := NewMockAnySyncClient()
+	client.DataDir = tmpDir
 
 	cleanup := func() {
-		client.Close()
+		client.Reset()
 		os.RemoveAll(tmpDir)
 	}
 

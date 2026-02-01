@@ -216,6 +216,30 @@ func ValidateMnemonic(mnemonic string) error {
 	return nil
 }
 
+// PersistUserPeerKey saves a user's peer private key for later use (e.g. JoinWithInvite).
+// The key is stored at {dataDir}/users/{userAID}/peer.key.
+func PersistUserPeerKey(dataDir, userAID string, key crypto.PrivKey) error {
+	userDir := filepath.Join(dataDir, "users", userAID)
+	if err := os.MkdirAll(userDir, 0700); err != nil {
+		return fmt.Errorf("creating user directory: %w", err)
+	}
+	data, err := key.Marshall()
+	if err != nil {
+		return fmt.Errorf("marshaling peer key: %w", err)
+	}
+	return os.WriteFile(filepath.Join(userDir, "peer.key"), data, 0600)
+}
+
+// LoadUserPeerKey loads a previously stored user peer key.
+func LoadUserPeerKey(dataDir, userAID string) (crypto.PrivKey, error) {
+	keyPath := filepath.Join(dataDir, "users", userAID, "peer.key")
+	data, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, fmt.Errorf("reading user peer key: %w", err)
+	}
+	return crypto.UnmarshalEd25519PrivateKeyProto(data)
+}
+
 // ExportPeerKey exports the peer key in a portable format
 func (m *PeerKeyManager) ExportPeerKey() ([]byte, error) {
 	return m.privKey.Marshall()

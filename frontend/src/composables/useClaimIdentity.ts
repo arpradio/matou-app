@@ -7,6 +7,8 @@
 import { ref } from 'vue';
 import { useKERIClient, KERIClient } from 'src/lib/keri/client';
 import { useOnboardingStore } from 'stores/onboarding';
+import { useAppStore } from 'stores/app';
+import { setBackendIdentity } from 'src/lib/api/client';
 
 export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'securing' | 'done' | 'error';
 
@@ -155,6 +157,35 @@ export function useClaimIdentity() {
 
       // Persist session (same passcode — no agent rotation)
       localStorage.setItem('matou_passcode', passcode);
+
+      // Step 4: Set backend identity (derives peer key, restarts SDK, creates private space)
+      step.value = 'securing';
+      progress.value = 'Configuring backend identity...';
+
+      try {
+        const onboardingMnemonic = useOnboardingStore().mnemonic.words;
+        if (onboardingMnemonic.length > 0) {
+          const mnemonicStr = onboardingMnemonic.join(' ');
+          localStorage.setItem('matou_mnemonic', mnemonicStr);
+
+          const appStore = useAppStore();
+          const identityResult = await setBackendIdentity({
+            aid: aid.prefix,
+            mnemonic: mnemonicStr,
+            orgAid: appStore.orgAid ?? undefined,
+            communitySpaceId: undefined, // assigned after community join
+          });
+          if (identityResult.success) {
+            console.log('[ClaimIdentity] Backend identity set, peer:', identityResult.peerId,
+              'private space:', identityResult.privateSpaceId);
+          } else {
+            console.warn('[ClaimIdentity] Backend identity set failed:', identityResult.error);
+          }
+        }
+      } catch (err) {
+        // Non-fatal - backend identity can be set on session restore
+        console.warn('[ClaimIdentity] Backend identity configuration deferred:', err);
+      }
 
       // Populate identity info for the dashboard
       onboardingStore.setUserAID(aid.prefix);

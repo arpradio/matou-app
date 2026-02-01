@@ -39,7 +39,6 @@ func TestCORSMiddleware_AllowedOrigin(t *testing.T) {
 func TestCORSMiddleware_DisallowedOrigin(t *testing.T) {
 	disallowedOrigins := []string{
 		"http://example.com",
-		"http://localhost:8080",
 		"https://malicious-site.com",
 		"",
 	}

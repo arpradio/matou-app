@@ -10,8 +10,9 @@ import (
 
 // Builder builds a trust graph from cached credentials
 type Builder struct {
-	store  *anystore.LocalStore
-	orgAID string
+	store            *anystore.LocalStore
+	orgAID           string
+	extraCredentials []*anystore.CachedCredential
 }
 
 // NewBuilder creates a new trust graph builder
@@ -20,6 +21,13 @@ func NewBuilder(store *anystore.LocalStore, orgAID string) *Builder {
 		store:  store,
 		orgAID: orgAID,
 	}
+}
+
+// WithExtraCredentials adds additional credentials (e.g. from AnySync P2P)
+// that are merged with anystore cache when building the trust graph.
+func (b *Builder) WithExtraCredentials(creds []*anystore.CachedCredential) *Builder {
+	b.extraCredentials = creds
+	return b
 }
 
 // Build constructs the trust graph from all cached credentials
@@ -38,6 +46,20 @@ func (b *Builder) Build(ctx context.Context) (*Graph, error) {
 	credentials, err := b.getAllCredentials(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// Merge extra credentials (e.g. from AnySync P2P), deduplicating by ID
+	if len(b.extraCredentials) > 0 {
+		seen := make(map[string]bool, len(credentials))
+		for _, c := range credentials {
+			seen[c.ID] = true
+		}
+		for _, c := range b.extraCredentials {
+			if !seen[c.ID] {
+				credentials = append(credentials, c)
+				seen[c.ID] = true
+			}
+		}
 	}
 
 	// Process each credential

@@ -22,6 +22,7 @@ import (
 // mockAnySyncClientForIntegration implements anysync.AnySyncClient for integration testing
 type mockAnySyncClientForIntegration struct {
 	spaces map[string]*anysync.SpaceCreateResult
+	space  commonspace.Space // optional: returned by GetSpace when set
 }
 
 func newMockAnySyncClientForIntegration() *mockAnySyncClientForIntegration {
@@ -73,21 +74,29 @@ func (m *mockAnySyncClientForIntegration) CreateSpaceWithKeys(ctx context.Contex
 }
 
 func (m *mockAnySyncClientForIntegration) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	if m.space != nil {
+		return m.space, nil
+	}
 	return nil, fmt.Errorf("mock: GetSpace not supported")
+}
+
+func (m *mockAnySyncClientForIntegration) MakeSpaceShareable(ctx context.Context, spaceID string) error {
+	return nil
 }
 
 // IntegrationTestEnv provides a complete test environment for integration testing
 type IntegrationTestEnv struct {
-	store         *anystore.LocalStore
-	spaceManager  *anysync.SpaceManager
-	spaceStore    anysync.SpaceStore
-	keriClient    *keri.Client
-	syncHandler   *SyncHandler
-	trustHandler  *TrustHandler
-	credHandler   *CredentialsHandler
-	spacesHandler *SpacesHandler
-	mux           *http.ServeMux
-	cleanup       func()
+	store          *anystore.LocalStore
+	spaceManager   *anysync.SpaceManager
+	spaceStore     anysync.SpaceStore
+	keriClient     *keri.Client
+	anysyncClient  *mockAnySyncClientForIntegration
+	syncHandler    *SyncHandler
+	trustHandler   *TrustHandler
+	credHandler    *CredentialsHandler
+	spacesHandler  *SpacesHandler
+	mux            *http.ServeMux
+	cleanup        func()
 }
 
 // setupIntegrationEnv creates a full integration test environment
@@ -130,8 +139,8 @@ func setupIntegrationEnv(t *testing.T) *IntegrationTestEnv {
 
 	// Create handlers
 	credHandler := NewCredentialsHandler(keriClient, store)
-	syncHandler := NewSyncHandler(keriClient, store, spaceManager, spaceStore)
-	trustHandler := NewTrustHandler(store, "EOrg123456789TestOrg")
+	syncHandler := NewSyncHandler(keriClient, store, spaceManager, spaceStore, nil)
+	trustHandler := NewTrustHandler(store, "EOrg123456789TestOrg", nil)
 	spacesHandler := &SpacesHandler{
 		spaceManager: spaceManager,
 		spaceStore:   spaceStore,
@@ -154,6 +163,7 @@ func setupIntegrationEnv(t *testing.T) *IntegrationTestEnv {
 		spaceManager:  spaceManager,
 		spaceStore:    spaceStore,
 		keriClient:    keriClient,
+		anysyncClient: anysyncClient,
 		syncHandler:   syncHandler,
 		trustHandler:  trustHandler,
 		credHandler:   credHandler,
@@ -1158,6 +1168,9 @@ func TestIntegration_InviteFlowWithSpaceSync(t *testing.T) {
 		t.Fatalf("create community space not successful: %s", createResp.Error)
 	}
 
+	// Set up mock space for invite (ACL mock chain)
+	env.anysyncClient.space = setupMockSpaceForInvite(t)
+
 	// Step 2: Invite user
 	inviteBody := `{
 		"recipientAid": "EUSER_INVITE_001",
@@ -1181,9 +1194,6 @@ func TestIntegration_InviteFlowWithSpaceSync(t *testing.T) {
 
 	if !inviteResp.Success {
 		t.Fatalf("invite not successful: %s", inviteResp.Error)
-	}
-	if inviteResp.PrivateSpaceID == "" {
-		t.Error("expected non-empty private space ID")
 	}
 	if inviteResp.CommunitySpaceID == "" {
 		t.Error("expected non-empty community space ID")
@@ -1229,6 +1239,10 @@ func TestIntegration_InviteFlowWithSpaceSync(t *testing.T) {
 	if len(syncResp.Spaces) == 0 {
 		t.Error("expected non-empty spaces list in sync response")
 	}
+
+	// Reset mock space so community members handler falls back to anystore cache
+	// (the mock space from invite step doesn't support StoredIds for tree discovery)
+	env.anysyncClient.space = nil
 
 	// Step 4: Get community members — should include the invited user
 	membersReq := httptest.NewRequest(http.MethodGet, "/api/v1/community/members", nil)

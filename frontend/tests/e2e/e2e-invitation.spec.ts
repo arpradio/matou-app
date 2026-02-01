@@ -1,9 +1,11 @@
 import { test, expect, Page, BrowserContext } from '@playwright/test';
 import { setupTestConfig } from './utils/mock-config';
+import { BackendManager } from './utils/backend-manager';
 import {
   FRONTEND_URL,
   TIMEOUT,
   setupPageLogging,
+  setupBackendRouting,
   loginWithMnemonic,
   loadAccounts,
   performOrgSetup,
@@ -18,6 +20,10 @@ import {
  * 2. Invitee enters invite code on splash, goes through welcome + profile + processing
  * 3. Invitee reaches the dashboard
  *
+ * Multi-backend: Admin uses the default backend on port 9080. The invitee gets
+ * a dedicated backend instance so their identity/set call doesn't overwrite
+ * the admin's identity. Recovery test (test 4) gets its own backend too.
+ *
  * Self-sufficient: if org-setup hasn't been run yet, performs it automatically.
  *
  * Run: npx playwright test --project=invitation
@@ -29,9 +35,11 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
   let adminPage: Page;
   let inviteCode: string;
   let claimedMnemonic: string[];
+  const backends = new BackendManager();
 
   test.beforeAll(async ({ browser, request }) => {
     // Create persistent admin context with test config isolation
+    // Admin uses the default backend on port 9080 (no routing needed)
     adminContext = await browser.newContext();
     await setupTestConfig(adminContext);
     adminPage = await adminContext.newPage();
@@ -72,6 +80,7 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
   });
 
   test.afterAll(async () => {
+    await backends.stopAll();
     await adminContext?.close();
   });
 
@@ -161,9 +170,13 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
 
     expect(inviteCode, 'Invite code must exist from previous test').toBeTruthy();
 
+    // Spawn a dedicated backend for the invitee
+    const inviteeBackend = await backends.start('invitee-claim');
+
     // Create fresh browser context for the invitee (no existing session)
     const inviteeContext = await browser.newContext();
     await setupTestConfig(inviteeContext);
+    await setupBackendRouting(inviteeContext, inviteeBackend.port);
     const inviteePage = await inviteeContext.newPage();
     setupPageLogging(inviteePage, 'Invitee');
 
@@ -297,6 +310,7 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       expect(storedPasscode, 'Stored passcode should differ from invite code (invite code encodes mnemonic, not passcode)').not.toBe(inviteCode);
     } finally {
       await inviteeContext.close();
+      await backends.stop('invitee-claim');
     }
   });
 
@@ -308,7 +322,8 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
 
     expect(inviteCode, 'Invite code must exist from previous test').toBeTruthy();
 
-    // Open splash in a fresh context
+    // This test doesn't need its own backend — it just validates the invite code
+    // against KERIA (no identity/set call happens since the code is rejected).
     const freshContext = await browser.newContext();
     await setupTestConfig(freshContext);
     const freshPage = await freshContext.newPage();
@@ -352,9 +367,13 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
     expect(claimedMnemonic, 'Mnemonic must exist from test 2').toBeTruthy();
     expect(claimedMnemonic).toHaveLength(12);
 
+    // Spawn a backend for the recovery session
+    const recoveryBackend = await backends.start('invitee-recovery');
+
     // Fresh browser context — no existing session
     const recoveryContext = await browser.newContext();
     await setupTestConfig(recoveryContext);
+    await setupBackendRouting(recoveryContext, recoveryBackend.port);
     const recoveryPage = await recoveryContext.newPage();
     setupPageLogging(recoveryPage, 'Recovery');
 
@@ -384,6 +403,7 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       console.log('[Test] PASS - Identity recovered, credential still active');
     } finally {
       await recoveryContext.close();
+      await backends.stop('invitee-recovery');
     }
   });
 });

@@ -5,12 +5,27 @@
 package anysync
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/anyproto/any-sync/util/crypto"
 )
+
+// writeJSONFile marshals v to JSON and writes it to path
+func writeJSONFile(path string, v interface{}) error {
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshaling JSON: %w", err)
+	}
+	return os.WriteFile(path, data, 0644)
+}
+
+// parseJSONFile unmarshals JSON data into v
+func parseJSONFile(data []byte, v interface{}) error {
+	return json.Unmarshal(data, v)
+}
 
 // SpaceKeySet holds the four keys required by any-sync for space creation.
 type SpaceKeySet struct {

@@ -11,8 +11,15 @@ import (
 	"time"
 
 	"github.com/anyproto/any-sync/commonspace"
+	"github.com/anyproto/any-sync/commonspace/acl/aclclient/mock_aclclient"
+	"github.com/anyproto/any-sync/commonspace/mock_commonspace"
+	"github.com/anyproto/any-sync/commonspace/object/acl/aclrecordproto"
+	"github.com/anyproto/any-sync/commonspace/object/acl/list"
+	"github.com/anyproto/any-sync/commonspace/object/acl/syncacl/mock_syncacl"
+	"github.com/anyproto/any-sync/consensus/consensusproto"
 	"github.com/anyproto/any-sync/util/crypto"
 	"github.com/matou-dao/backend/internal/anysync"
+	"go.uber.org/mock/gomock"
 )
 
 // mockAnySyncClient implements anysync.AnySyncClient for testing
@@ -23,6 +30,7 @@ type mockAnySyncClient struct {
 	networkID      string
 	coordinatorURL string
 	peerID         string
+	space          commonspace.Space // optional: returned by GetSpace when set
 }
 
 func newMockClient() *mockAnySyncClient {
@@ -80,7 +88,117 @@ func (m *mockAnySyncClient) CreateSpaceWithKeys(ctx context.Context, ownerAID st
 }
 
 func (m *mockAnySyncClient) GetSpace(ctx context.Context, spaceID string) (commonspace.Space, error) {
+	if m.space != nil {
+		return m.space, nil
+	}
 	return nil, fmt.Errorf("mock: GetSpace not supported")
+}
+
+func (m *mockAnySyncClient) MakeSpaceShareable(ctx context.Context, spaceID string) error {
+	return nil
+}
+
+// testAclRecordBuilder implements list.AclRecordBuilder for testing invite flow
+type testAclRecordBuilder struct {
+	buildInviteAnyoneResult list.InviteResult
+	buildInviteAnyoneErr    error
+}
+
+func (m *testAclRecordBuilder) UnmarshallWithId(_ *consensusproto.RawRecordWithId) (*list.AclRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) Unmarshall(_ *consensusproto.RawRecord) (*list.AclRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildRoot(_ list.RootContent) (*consensusproto.RawRecordWithId, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildOneToOneRoot(_ list.RootContent, _ *aclrecordproto.AclOneToOneInfo) (*consensusproto.RawRecordWithId, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildBatchRequest(_ list.BatchRequestPayload) (list.BatchResult, error) {
+	return list.BatchResult{}, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildInvite() (list.InviteResult, error) {
+	return list.InviteResult{}, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildInviteAnyone(_ list.AclPermissions) (list.InviteResult, error) {
+	return m.buildInviteAnyoneResult, m.buildInviteAnyoneErr
+}
+func (m *testAclRecordBuilder) BuildInviteChange(_ list.InviteChangePayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildInviteRevoke(_ string) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildInviteJoinWithoutApprove(_ list.InviteJoinPayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildRequestJoin(_ list.RequestJoinPayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildRequestAccept(_ list.RequestAcceptPayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildRequestDecline(_ string) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildRequestCancel(_ string) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildRequestRemove() (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildPermissionChange(_ list.PermissionChangePayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildPermissionChanges(_ list.PermissionChangesPayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildOwnershipChange(_ list.OwnershipChangePayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildReadKeyChange(_ list.ReadKeyChangePayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildAccountRemove(_ list.AccountRemovePayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+func (m *testAclRecordBuilder) BuildAccountsAdd(_ list.AccountsAddPayload) (*consensusproto.RawRecord, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
+// setupMockSpaceForInvite creates a gomock Space with the full ACL mock chain
+// needed by MatouACLManager.CreateOpenInvite
+func setupMockSpaceForInvite(t *testing.T) commonspace.Space {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+
+	inviteKey, _, err := crypto.GenerateRandomEd25519KeyPair()
+	if err != nil {
+		t.Fatalf("generating test key: %v", err)
+	}
+
+	inviteRec := &consensusproto.RawRecord{Payload: []byte("test-invite-record")}
+	builder := &testAclRecordBuilder{
+		buildInviteAnyoneResult: list.InviteResult{
+			InviteRec: inviteRec,
+			InviteKey: inviteKey,
+		},
+	}
+
+	mockSpace := mock_commonspace.NewMockSpace(ctrl)
+	mockAcl := mock_syncacl.NewMockSyncAcl(ctrl)
+	mockAclClient := mock_aclclient.NewMockAclSpaceClient(ctrl)
+
+	mockSpace.EXPECT().Acl().Return(mockAcl)
+	mockAcl.EXPECT().Lock()
+	mockAcl.EXPECT().Unlock()
+	mockAcl.EXPECT().RecordBuilder().Return(builder)
+	mockSpace.EXPECT().AclClient().Return(mockAclClient)
+	mockAclClient.EXPECT().AddRecord(gomock.Any(), inviteRec).Return(nil)
+
+	return mockSpace
 }
 
 // mockSpaceStore implements anysync.SpaceStore for testing
@@ -396,7 +514,8 @@ func TestHandleCreatePrivate_Idempotent(t *testing.T) {
 }
 
 func TestHandleInvite_Success(t *testing.T) {
-	handler, _, _ := setupTestSpacesHandler(t)
+	handler, mockClient, _ := setupTestSpacesHandler(t)
+	mockClient.space = setupMockSpaceForInvite(t)
 
 	reqBody := InviteRequest{
 		RecipientAID:   "EUSER123456789",
@@ -428,9 +547,6 @@ func TestHandleInvite_Success(t *testing.T) {
 		t.Error("expected non-empty community space ID")
 	}
 
-	if resp.PrivateSpaceID == "" {
-		t.Error("expected non-empty private space ID")
-	}
 }
 
 func TestHandleInvite_MissingRecipientAID(t *testing.T) {

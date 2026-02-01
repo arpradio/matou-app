@@ -9,6 +9,7 @@ import (
 
 	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/anystore"
+	"github.com/matou-dao/backend/internal/identity"
 	"github.com/matou-dao/backend/internal/keri"
 )
 
@@ -16,10 +17,11 @@ import (
 // This handler receives credentials and KELs from the frontend (fetched from KERIA via signify-ts)
 // and stores them in anystore (local cache) and routes them to any-sync spaces.
 type SyncHandler struct {
-	keriClient   *keri.Client
-	store        *anystore.LocalStore
-	spaceManager *anysync.SpaceManager
-	spaceStore   anysync.SpaceStore
+	keriClient    *keri.Client
+	store         *anystore.LocalStore
+	spaceManager  *anysync.SpaceManager
+	spaceStore    anysync.SpaceStore
+	userIdentity  *identity.UserIdentity
 }
 
 // NewSyncHandler creates a new sync handler
@@ -28,18 +30,21 @@ func NewSyncHandler(
 	store *anystore.LocalStore,
 	spaceManager *anysync.SpaceManager,
 	spaceStore anysync.SpaceStore,
+	userIdentity *identity.UserIdentity,
 ) *SyncHandler {
 	return &SyncHandler{
 		keriClient:   keriClient,
 		store:        store,
 		spaceManager: spaceManager,
 		spaceStore:   spaceStore,
+		userIdentity: userIdentity,
 	}
 }
 
-// SyncCredentialsRequest represents a credential sync request from frontend
+// SyncCredentialsRequest represents a credential sync request from frontend.
+// UserAID is optional in per-user mode (falls back to userIdentity).
 type SyncCredentialsRequest struct {
-	UserAID     string            `json:"userAid"`
+	UserAID     string            `json:"userAid,omitempty"`
 	Credentials []keri.Credential `json:"credentials"`
 }
 
@@ -54,9 +59,10 @@ type SyncCredentialsResponse struct {
 	Errors         []string `json:"errors,omitempty"`
 }
 
-// SyncKELRequest represents a KEL sync request from frontend
+// SyncKELRequest represents a KEL sync request from frontend.
+// UserAID is optional in per-user mode (falls back to userIdentity).
 type SyncKELRequest struct {
-	UserAID string     `json:"userAid"`
+	UserAID string     `json:"userAid,omitempty"`
 	KEL     []KELEvent `json:"kel"`
 }
 
@@ -120,10 +126,15 @@ func (h *SyncHandler) HandleSyncCredentials(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if req.UserAID == "" {
-		writeJSON(w, http.StatusBadRequest, SyncCredentialsResponse{
+	// In per-user mode, use local identity. Fall back to request body for backward compat.
+	userAID := req.UserAID
+	if userAID == "" && h.userIdentity != nil {
+		userAID = h.userIdentity.GetAID()
+	}
+	if userAID == "" {
+		writeJSON(w, http.StatusConflict, SyncCredentialsResponse{
 			Success: false,
-			Errors:  []string{"userAid is required"},
+			Errors:  []string{"identity not configured — call POST /api/v1/identity/set first"},
 		})
 		return
 	}
@@ -135,7 +146,7 @@ func (h *SyncHandler) HandleSyncCredentials(w http.ResponseWriter, r *http.Reque
 	spaceSet := make(map[string]bool)
 
 	// Get or create user's private space
-	privateSpace, err := h.spaceManager.GetOrCreatePrivateSpace(ctx, req.UserAID, h.spaceStore)
+	privateSpace, err := h.spaceManager.GetOrCreatePrivateSpace(ctx, userAID, h.spaceStore)
 	if err != nil {
 		errors = append(errors, fmt.Sprintf("failed to get/create private space: %v", err))
 	}
@@ -240,10 +251,15 @@ func (h *SyncHandler) HandleSyncKEL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.UserAID == "" {
-		writeJSON(w, http.StatusBadRequest, SyncKELResponse{
+	// In per-user mode, use local identity. Fall back to request body for backward compat.
+	kelUserAID := req.UserAID
+	if kelUserAID == "" && h.userIdentity != nil {
+		kelUserAID = h.userIdentity.GetAID()
+	}
+	if kelUserAID == "" {
+		writeJSON(w, http.StatusConflict, SyncKELResponse{
 			Success: false,
-			Error:   "userAid is required",
+			Error:   "identity not configured — call POST /api/v1/identity/set first",
 		})
 		return
 	}
@@ -259,7 +275,7 @@ func (h *SyncHandler) HandleSyncKEL(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	// Get or create user's private space
-	privateSpace, err := h.spaceManager.GetOrCreatePrivateSpace(ctx, req.UserAID, h.spaceStore)
+	privateSpace, err := h.spaceManager.GetOrCreatePrivateSpace(ctx, kelUserAID, h.spaceStore)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, SyncKELResponse{
 			Success: false,
@@ -282,8 +298,8 @@ func (h *SyncHandler) HandleSyncKEL(w http.ResponseWriter, r *http.Request) {
 	for _, event := range req.KEL {
 		// Create KEL record
 		record := map[string]interface{}{
-			"id":        fmt.Sprintf("%s-%d", req.UserAID, event.Sequence),
-			"userAid":   req.UserAID,
+			"id":        fmt.Sprintf("%s-%d", kelUserAID, event.Sequence),
+			"userAid":   kelUserAID,
 			"type":      event.Type,
 			"sequence":  event.Sequence,
 			"digest":    event.Digest,
@@ -312,7 +328,9 @@ func (h *SyncHandler) HandleSyncKEL(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleGetCommunityMembers handles GET /api/v1/community/members
-// Returns all members with community-visible membership credentials
+// Returns all members with community-visible membership credentials.
+// Tries AnySync community space ObjectTree first (P2P synced data),
+// falls back to anystore cache if tree is not available.
 func (h *SyncHandler) HandleGetCommunityMembers(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
@@ -322,8 +340,42 @@ func (h *SyncHandler) HandleGetCommunityMembers(w http.ResponseWriter, r *http.R
 	}
 
 	ctx := context.Background()
+	members := []CommunityMember{}
 
-	// Query all credentials with membership schema
+	// Try reading from AnySync community space ObjectTree first
+	communitySpaceID := h.spaceManager.GetCommunitySpaceID()
+	if communitySpaceID != "" {
+		treeMgr := h.spaceManager.CredentialTreeManager()
+		if treeMgr != nil {
+			creds, err := treeMgr.ReadCredentials(ctx, communitySpaceID)
+			if err == nil && len(creds) > 0 {
+				for _, cred := range creds {
+					if cred.Schema != "EMatouMembershipSchemaV1" {
+						continue
+					}
+					var data keri.CredentialData
+					if cred.Data != nil {
+						json.Unmarshal(cred.Data, &data)
+					}
+					members = append(members, CommunityMember{
+						AID:                cred.Recipient,
+						Role:               data.Role,
+						VerificationStatus: data.VerificationStatus,
+						Permissions:        data.Permissions,
+						JoinedAt:           data.JoinedAt,
+						CredentialSAID:     cred.SAID,
+					})
+				}
+				writeJSON(w, http.StatusOK, CommunityMembersResponse{
+					Members: members,
+					Total:   len(members),
+				})
+				return
+			}
+		}
+	}
+
+	// Fallback: query anystore cache
 	credCollection, err := h.store.CredentialsCache(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -332,7 +384,6 @@ func (h *SyncHandler) HandleGetCommunityMembers(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	// Find all membership credentials
 	query := anystore.MustParseJSON(`{"schemaID": "EMatouMembershipSchemaV1"}`)
 	iter, err := credCollection.Find(query).Iter(ctx)
 	if err != nil {
@@ -343,7 +394,6 @@ func (h *SyncHandler) HandleGetCommunityMembers(w http.ResponseWriter, r *http.R
 	}
 	defer iter.Close()
 
-	members := []CommunityMember{}
 	for iter.Next() {
 		doc, err := iter.Doc()
 		if err != nil {
@@ -355,21 +405,18 @@ func (h *SyncHandler) HandleGetCommunityMembers(w http.ResponseWriter, r *http.R
 			continue
 		}
 
-		// Extract credential data
 		var data keri.CredentialData
 		dataBytes, _ := json.Marshal(cached.Data)
 		json.Unmarshal(dataBytes, &data)
 
-		member := CommunityMember{
+		members = append(members, CommunityMember{
 			AID:                cached.SubjectAID,
 			Role:               data.Role,
 			VerificationStatus: data.VerificationStatus,
 			Permissions:        data.Permissions,
 			JoinedAt:           data.JoinedAt,
 			CredentialSAID:     cached.ID,
-		}
-
-		members = append(members, member)
+		})
 	}
 
 	writeJSON(w, http.StatusOK, CommunityMembersResponse{
@@ -379,7 +426,9 @@ func (h *SyncHandler) HandleGetCommunityMembers(w http.ResponseWriter, r *http.R
 }
 
 // HandleGetCommunityCredentials handles GET /api/v1/community/credentials
-// Returns all community-visible credentials (memberships, roles)
+// Returns all community-visible credentials (memberships, roles).
+// Tries AnySync community space ObjectTree first (P2P synced data),
+// falls back to anystore cache if tree is not available.
 func (h *SyncHandler) HandleGetCommunityCredentials(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
@@ -389,7 +438,42 @@ func (h *SyncHandler) HandleGetCommunityCredentials(w http.ResponseWriter, r *ht
 	}
 
 	ctx := context.Background()
+	credentials := []keri.Credential{}
 
+	// Try reading from AnySync community space ObjectTree first
+	communitySpaceID := h.spaceManager.GetCommunitySpaceID()
+	if communitySpaceID != "" {
+		treeMgr := h.spaceManager.CredentialTreeManager()
+		if treeMgr != nil {
+			creds, err := treeMgr.ReadCredentials(ctx, communitySpaceID)
+			if err == nil && len(creds) > 0 {
+				for _, cred := range creds {
+					anysyncCred := &anysync.Credential{Schema: cred.Schema}
+					if !anysync.IsCommunityVisible(anysyncCred) {
+						continue
+					}
+					var data keri.CredentialData
+					if cred.Data != nil {
+						json.Unmarshal(cred.Data, &data)
+					}
+					credentials = append(credentials, keri.Credential{
+						SAID:      cred.SAID,
+						Issuer:    cred.Issuer,
+						Recipient: cred.Recipient,
+						Schema:    cred.Schema,
+						Data:      data,
+					})
+				}
+				writeJSON(w, http.StatusOK, CommunityCredentialsResponse{
+					Credentials: credentials,
+					Total:       len(credentials),
+				})
+				return
+			}
+		}
+	}
+
+	// Fallback: query anystore cache
 	credCollection, err := h.store.CredentialsCache(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{
@@ -408,7 +492,6 @@ func (h *SyncHandler) HandleGetCommunityCredentials(w http.ResponseWriter, r *ht
 	}
 	defer iter.Close()
 
-	credentials := []keri.Credential{}
 	for iter.Next() {
 		doc, err := iter.Doc()
 		if err != nil {
@@ -431,15 +514,13 @@ func (h *SyncHandler) HandleGetCommunityCredentials(w http.ResponseWriter, r *ht
 		dataBytes, _ := json.Marshal(cached.Data)
 		json.Unmarshal(dataBytes, &data)
 
-		cred := keri.Credential{
+		credentials = append(credentials, keri.Credential{
 			SAID:      cached.ID,
 			Issuer:    cached.IssuerAID,
 			Recipient: cached.SubjectAID,
 			Schema:    cached.SchemaID,
 			Data:      data,
-		}
-
-		credentials = append(credentials, cred)
+		})
 	}
 
 	writeJSON(w, http.StatusOK, CommunityCredentialsResponse{
