@@ -50,6 +50,69 @@
           />
         </div>
 
+        <!-- Admin Email -->
+        <div class="form-group">
+          <label class="text-white/90 text-sm font-medium mb-2 block">
+            Admin Email
+            <span class="text-white/50 font-normal">(optional)</span>
+          </label>
+          <MInput
+            v-model="adminEmail"
+            type="email"
+            placeholder="admin@example.com"
+            :disabled="isSubmitting"
+            class="setup-input"
+          />
+        </div>
+
+        <!-- Admin Avatar -->
+        <div class="form-group">
+          <label class="text-white/90 text-sm font-medium mb-2 block">
+            Admin Avatar
+            <span class="text-white/50 font-normal">(optional)</span>
+          </label>
+          <div class="flex items-center gap-4">
+            <div class="w-14 h-14 rounded-full overflow-hidden border-2 border-white/30 bg-white/10 flex items-center justify-center shrink-0">
+              <img
+                v-if="avatarPreview"
+                :src="avatarPreview"
+                alt="Avatar preview"
+                class="w-full h-full object-cover"
+              />
+              <User v-else class="w-6 h-6 text-white/50" />
+            </div>
+            <div>
+              <input
+                ref="fileInput"
+                type="file"
+                accept="image/*"
+                class="hidden"
+                @change="handleFileSelect"
+              />
+              <MBtn
+                type="button"
+                variant="outline"
+                size="sm"
+                class="text-white border-white/30 hover:bg-white/10"
+                @click="fileInput?.click()"
+                :disabled="isSubmitting || isUploadingAvatar"
+              >
+                <Upload v-if="!isUploadingAvatar" class="w-4 h-4 mr-2" />
+                <Loader2 v-else class="w-4 h-4 mr-2 animate-spin" />
+                {{ avatarPreview ? 'Change' : 'Upload' }}
+              </MBtn>
+              <button
+                v-if="avatarPreview"
+                type="button"
+                class="ml-2 text-white/60 hover:text-white text-xs"
+                @click="removeAvatar"
+              >
+                Remove
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- Error Display -->
         <div v-if="error" class="error-banner bg-red-500/20 border border-red-400/30 rounded-xl p-4">
           <div class="flex items-start gap-3">
@@ -137,10 +200,11 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { Building2, Info, AlertCircle, Rocket, Loader2, CheckCircle2, Circle } from 'lucide-vue-next';
+import { Building2, Info, AlertCircle, Rocket, Loader2, CheckCircle2, Circle, User, Upload } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
 import MInput from '../base/MInput.vue';
 import { useOrgSetup } from 'src/composables/useOrgSetup';
+import { uploadFile } from 'src/lib/api/client';
 
 const emit = defineEmits<{
   (e: 'setup-complete'): void;
@@ -149,6 +213,11 @@ const emit = defineEmits<{
 // Form state
 const orgName = ref('');
 const adminName = ref('');
+const adminEmail = ref('');
+const avatarPreview = ref<string | null>(null);
+const avatarFileRef = ref<string | null>(null);
+const fileInput = ref<HTMLInputElement | null>(null);
+const isUploadingAvatar = ref(false);
 
 // Setup composable
 const { isSubmitting, error, progress, setupOrg } = useOrgSetup();
@@ -184,10 +253,53 @@ function stepClass(keyword: string): string {
   return 'text-white/40';
 }
 
+function handleFileSelect(event: Event) {
+  const target = event.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+
+  if (file.size > 5 * 1024 * 1024) {
+    return; // Max 5MB
+  }
+
+  // Show preview
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    avatarPreview.value = e.target?.result as string;
+  };
+  reader.readAsDataURL(file);
+
+  // Upload to backend
+  isUploadingAvatar.value = true;
+  uploadFile(file)
+    .then((result) => {
+      if (result.fileRef) {
+        avatarFileRef.value = result.fileRef;
+        console.log('[OrgSetup] Avatar uploaded, fileRef:', result.fileRef);
+      }
+    })
+    .catch((err) => {
+      console.warn('[OrgSetup] Avatar upload failed:', err);
+    })
+    .finally(() => {
+      isUploadingAvatar.value = false;
+    });
+}
+
+function removeAvatar() {
+  avatarPreview.value = null;
+  avatarFileRef.value = null;
+  if (fileInput.value) {
+    fileInput.value.value = '';
+  }
+}
+
 async function handleSubmit() {
   const success = await setupOrg({
     orgName: orgName.value.trim(),
     adminName: adminName.value.trim(),
+    adminEmail: adminEmail.value.trim() || undefined,
+    adminAvatar: avatarFileRef.value || undefined,
   });
 
   if (success) {

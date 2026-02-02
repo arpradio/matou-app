@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/anystore"
@@ -64,7 +65,8 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
 
 	// Basic health response
 	response := HealthResponse{
@@ -73,13 +75,13 @@ func (h *HealthHandler) HandleHealth(w http.ResponseWriter, r *http.Request) {
 		Admin:        h.adminAID,
 	}
 
-	// Get sync status
+	// Get sync status (best-effort, don't block health check)
 	syncStatus := h.getSyncStatus(ctx)
 	if syncStatus != nil {
 		response.Sync = syncStatus
 	}
 
-	// Get trust status
+	// Get trust status (best-effort)
 	trustStatus := h.getTrustStatus(ctx)
 	if trustStatus != nil {
 		response.Trust = trustStatus

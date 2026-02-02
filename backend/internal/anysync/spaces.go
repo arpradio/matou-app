@@ -13,8 +13,10 @@ import (
 
 // Space types
 const (
-	SpaceTypePrivate   = "private"
-	SpaceTypeCommunity = "community"
+	SpaceTypePrivate           = "private"
+	SpaceTypeCommunity         = "community"
+	SpaceTypeCommunityReadOnly = "community-readonly"
+	SpaceTypeAdmin             = "admin"
 )
 
 // Space represents an any-sync space
@@ -29,27 +31,51 @@ type Space struct {
 
 // SpaceManager manages any-sync spaces for MATOU
 type SpaceManager struct {
-	client           AnySyncClient
-	aclManager       *MatouACLManager
-	credTreeManager  *CredentialTreeManager
-	communitySpaceID string
-	orgAID           string
+	client                   AnySyncClient
+	aclManager               *MatouACLManager
+	credTreeManager          *CredentialTreeManager
+	objTreeManager           *ObjectTreeManager
+	fileManager              *FileManager
+	treeCache                *TreeCache
+	communitySpaceID         string
+	communityReadOnlySpaceID string
+	adminSpaceID             string
+	orgAID                   string
 }
 
 // SpaceManagerConfig holds configuration for SpaceManager
 type SpaceManagerConfig struct {
-	CommunitySpaceID string
-	OrgAID           string
+	CommunitySpaceID         string
+	CommunityReadOnlySpaceID string
+	AdminSpaceID             string
+	OrgAID                   string
 }
 
-// NewSpaceManager creates a new SpaceManager
+// NewSpaceManager creates a new SpaceManager with shared TreeCache.
 func NewSpaceManager(client AnySyncClient, cfg *SpaceManagerConfig) *SpaceManager {
+	cache := NewTreeCache()
+	objTreeMgr := NewObjectTreeManager(client, nil, cache)
+
+	// Initialize FileManager if pool and nodeconf are available (real SDK client).
+	// Mock clients return nil for GetPool/GetNodeConf, so FileManager is nil in tests.
+	var fileMgr *FileManager
+	if p := client.GetPool(); p != nil {
+		if nc := client.GetNodeConf(); nc != nil {
+			fileMgr = NewFileManager(p, nc, objTreeMgr)
+		}
+	}
+
 	return &SpaceManager{
-		client:           client,
-		aclManager:       NewMatouACLManager(client, nil),
-		credTreeManager:  NewCredentialTreeManager(client, nil),
-		communitySpaceID: cfg.CommunitySpaceID,
-		orgAID:           cfg.OrgAID,
+		client:                   client,
+		aclManager:               NewMatouACLManager(client, nil),
+		credTreeManager:          NewCredentialTreeManager(client, nil, cache),
+		objTreeManager:           objTreeMgr,
+		fileManager:              fileMgr,
+		treeCache:                cache,
+		communitySpaceID:         cfg.CommunitySpaceID,
+		communityReadOnlySpaceID: cfg.CommunityReadOnlySpaceID,
+		adminSpaceID:             cfg.AdminSpaceID,
+		orgAID:                   cfg.OrgAID,
 	}
 }
 
@@ -61,6 +87,37 @@ func (m *SpaceManager) ACLManager() *MatouACLManager {
 // CredentialTreeManager returns the credential tree manager.
 func (m *SpaceManager) CredentialTreeManager() *CredentialTreeManager {
 	return m.credTreeManager
+}
+
+// ObjectTreeManager returns the object tree manager.
+func (m *SpaceManager) ObjectTreeManager() *ObjectTreeManager {
+	return m.objTreeManager
+}
+
+// FileManager returns the file manager for filenode-based file storage.
+// Returns nil if the client does not support pool/nodeconf (e.g. mock client).
+func (m *SpaceManager) FileManager() *FileManager {
+	return m.fileManager
+}
+
+// GetCommunityReadOnlySpaceID returns the community read-only space ID.
+func (m *SpaceManager) GetCommunityReadOnlySpaceID() string {
+	return m.communityReadOnlySpaceID
+}
+
+// SetCommunityReadOnlySpaceID sets the community read-only space ID.
+func (m *SpaceManager) SetCommunityReadOnlySpaceID(spaceID string) {
+	m.communityReadOnlySpaceID = spaceID
+}
+
+// GetAdminSpaceID returns the admin space ID.
+func (m *SpaceManager) GetAdminSpaceID() string {
+	return m.adminSpaceID
+}
+
+// SetAdminSpaceID sets the admin space ID.
+func (m *SpaceManager) SetAdminSpaceID(spaceID string) {
+	m.adminSpaceID = spaceID
 }
 
 // generatePrivateSpaceID generates a deterministic space ID for a user

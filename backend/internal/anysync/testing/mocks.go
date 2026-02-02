@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/anyproto/any-sync/commonspace"
+	"github.com/anyproto/any-sync/net/pool"
+	"github.com/anyproto/any-sync/nodeconf"
 	"github.com/anyproto/any-sync/util/crypto"
 	"github.com/matou-dao/backend/internal/anysync"
 )
@@ -332,6 +334,26 @@ func (m *MockAnySyncClient) GetSpace(ctx context.Context, spaceID string) (commo
 // GetDataDir implements AnySyncClient.GetDataDir
 func (m *MockAnySyncClient) GetDataDir() string {
 	return m.DataDir
+}
+
+// GetSigningKey implements AnySyncClient.GetSigningKey
+func (m *MockAnySyncClient) GetSigningKey() crypto.PrivKey {
+	return nil
+}
+
+// GetPool implements AnySyncClient.GetPool
+func (m *MockAnySyncClient) GetPool() pool.Pool {
+	return nil
+}
+
+// GetNodeConf implements AnySyncClient.GetNodeConf
+func (m *MockAnySyncClient) GetNodeConf() nodeconf.Service {
+	return nil
+}
+
+// SetAccountFileLimits implements AnySyncClient.SetAccountFileLimits
+func (m *MockAnySyncClient) SetAccountFileLimits(ctx context.Context, identity string, limitBytes uint64) error {
+	return nil
 }
 
 // Reset clears all recorded calls and state

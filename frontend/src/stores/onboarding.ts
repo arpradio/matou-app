@@ -76,6 +76,7 @@ export interface ProfileData {
   email: string;
   avatar: File | null;
   avatarPreview: string | null; // Base64 or object URL for preview
+  avatarFileRef: string | null; // Content-addressed fileRef from backend upload
   participationInterests: ParticipationInterest[];
   customInterests: string;
   hasAgreedToTerms: boolean;
@@ -113,6 +114,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     email: '',
     avatar: null,
     avatarPreview: null,
+    avatarFileRef: null,
     participationInterests: [],
     customInterests: '',
     hasAgreedToTerms: false,
@@ -211,6 +213,7 @@ export const useOnboardingStore = defineStore('onboarding', () => {
       email: '',
       avatar: null,
       avatarPreview: null,
+      avatarFileRef: null,
       participationInterests: [],
       customInterests: '',
       hasAgreedToTerms: false,

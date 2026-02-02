@@ -21,9 +21,11 @@ export interface PendingRegistration {
   applicantOOBI?: string;
   profile: {
     name: string;
+    email?: string;
     bio: string;
     interests: string[];
     customInterests?: string;
+    avatarFileRef?: string;
     submittedAt: string;
   };
   /** True if from escrowed message (OOBI not resolved), false if verified */
@@ -136,9 +138,11 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
             applicantOOBI: (embeddedData.senderOOBI as string) || undefined,
             profile: {
               name,
+              email: (embeddedData.email as string) || undefined,
               bio: (embeddedData.bio as string) || '',
               interests: (embeddedData.interests as string[]) || [],
               customInterests: (embeddedData.customInterests as string) || undefined,
+              avatarFileRef: (embeddedData.avatarFileRef as string) || undefined,
               submittedAt: (attrs?.dt as string) || new Date().toISOString(),
             },
             isPending: true,
@@ -174,9 +178,11 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
             applicantOOBI: (embeddedData.senderOOBI as string) || undefined,
             profile: {
               name,
+              email: (embeddedData.email as string) || undefined,
               bio: (embeddedData.bio as string) || '',
               interests: (embeddedData.interests as string[]) || [],
               customInterests: (embeddedData.customInterests as string) || undefined,
+              avatarFileRef: (embeddedData.avatarFileRef as string) || undefined,
               submittedAt: (attrs?.dt as string) || new Date().toISOString(),
             },
             isPending: true,
@@ -217,9 +223,11 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
             applicantOOBI: (attributes.senderOOBI as string) || undefined,
             profile: {
               name: (attributes.name as string) || 'Unknown',
+              email: (attributes.email as string) || undefined,
               bio: (attributes.bio as string) || '',
               interests: (attributes.interests as string[]) || [],
               customInterests: (attributes.customInterests as string) || undefined,
+              avatarFileRef: (attributes.avatarFileRef as string) || undefined,
               submittedAt: (attributes.submittedAt as string) || new Date().toISOString(),
             },
             isPending: false,
@@ -258,9 +266,11 @@ export function useRegistrationPolling(options: RegistrationPollingOptions = {})
             applicantOOBI: (attributes.senderOOBI as string) || undefined,
             profile: {
               name: (attributes.name as string) || 'Unknown',
+              email: (attributes.email as string) || undefined,
               bio: (attributes.bio as string) || '',
               interests: (attributes.interests as string[]) || [],
               customInterests: (attributes.customInterests as string) || undefined,
+              avatarFileRef: (attributes.avatarFileRef as string) || undefined,
               submittedAt: (attributes.submittedAt as string) || new Date().toISOString(),
             },
             isPending: false,

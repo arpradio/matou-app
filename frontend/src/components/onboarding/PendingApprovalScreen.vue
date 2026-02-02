@@ -63,11 +63,36 @@
                 </div>
               </div>
 
-              <!-- Processing indicator -->
-              <div v-if="currentStatus === 'processing'" class="processing-box bg-primary/5 rounded-xl p-4">
-                <div class="flex items-center gap-3">
-                  <div class="w-2 h-2 bg-primary rounded-full animate-pulse" />
-                  <span class="text-sm text-muted-foreground">Credential being issued...</span>
+              <!-- Processing Steps (shown when credential is being processed or approved) -->
+              <div v-if="currentStatus === 'processing' || currentStatus === 'approved'" class="processing-steps bg-secondary/50 rounded-xl p-4">
+                <div class="space-y-3">
+                  <div
+                    v-for="s in processingSteps"
+                    :key="s.key"
+                    class="flex items-center gap-3"
+                  >
+                    <CheckCircle2
+                      v-if="isProcessingStepComplete(s.key)"
+                      class="w-5 h-5 text-accent shrink-0"
+                    />
+                    <Loader2
+                      v-else-if="isProcessingStepActive(s.key)"
+                      class="w-5 h-5 text-primary animate-spin shrink-0"
+                    />
+                    <Circle
+                      v-else
+                      class="w-5 h-5 text-muted-foreground/40 shrink-0"
+                    />
+                    <span
+                      class="text-sm"
+                      :class="{
+                        'text-foreground font-medium': isProcessingStepActive(s.key) || isProcessingStepComplete(s.key),
+                        'text-muted-foreground': !isProcessingStepActive(s.key) && !isProcessingStepComplete(s.key),
+                      }"
+                    >
+                      {{ s.label }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -238,7 +263,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { Clock, FileText, Users, Target, BookOpen, ExternalLink, CheckCircle, XCircle, Loader2, Copy, Check, MessageCircle } from 'lucide-vue-next';
+import { Clock, FileText, Users, Target, BookOpen, ExternalLink, CheckCircle, CheckCircle2, Circle, XCircle, Loader2, Copy, Check, MessageCircle } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
 import WelcomeOverlay from './WelcomeOverlay.vue';
 import { useAnimationPresets } from 'composables/useAnimationPresets';
@@ -298,6 +323,9 @@ const {
   credential,
   spaceInviteReceived,
   spaceInviteKey,
+  spaceId,
+  readOnlyInviteKey,
+  readOnlySpaceId,
   rejectionReceived,
   rejectionInfo,
   adminMessages,
@@ -366,8 +394,10 @@ const statusConfig = computed(() => {
     case 'approved':
       return {
         icon: CheckCircle,
-        title: 'Your membership has been approved!',
-        description: 'Congratulations! Your credential has been issued and added to your wallet.',
+        title: 'Membership approved!',
+        description: processingStep.value === 'done'
+          ? 'Your community access is ready.'
+          : 'Your credential has been issued. Setting up community access...',
         iconClass: 'text-green-600',
         bgClass: 'bg-green-100',
       };
@@ -382,8 +412,8 @@ const statusConfig = computed(() => {
     case 'processing':
       return {
         icon: Loader2,
-        title: 'Processing your credential...',
-        description: 'Your application has been approved! We\'re now issuing your membership credential.',
+        title: 'Credential detected',
+        description: 'Your application has been approved. Processing your membership credential...',
         iconClass: 'text-primary',
         bgClass: 'bg-primary/10',
         animate: true,
@@ -399,49 +429,95 @@ const statusConfig = computed(() => {
   }
 });
 
+// Processing steps for post-approval flow
+type ProcessingStep = 'admitting' | 'invite' | 'joining' | 'verifying' | 'done';
+
+const processingStep = ref<ProcessingStep>('admitting');
+
+const processingStepOrder: ProcessingStep[] = ['admitting', 'invite', 'joining', 'verifying', 'done'];
+
+const processingSteps = [
+  { key: 'admitting' as ProcessingStep, label: 'Admitting credential' },
+  { key: 'invite' as ProcessingStep, label: 'Receiving space invite' },
+  { key: 'joining' as ProcessingStep, label: 'Joining community space' },
+  { key: 'verifying' as ProcessingStep, label: 'Verifying access' },
+  { key: 'done' as ProcessingStep, label: 'Ready to enter' },
+];
+
+function isProcessingStepComplete(key: ProcessingStep): boolean {
+  const currentIdx = processingStepOrder.indexOf(processingStep.value);
+  const stepIdx = processingStepOrder.indexOf(key);
+  return currentIdx > stepIdx;
+}
+
+function isProcessingStepActive(key: ProcessingStep): boolean {
+  return processingStep.value === key;
+}
+
 // Start polling on mount
 onMounted(() => {
   startPolling();
 });
 
+// Guard to prevent concurrent watcher callbacks from racing
+let joinInProgress = false;
+
 // Watch for both credential and space invite to be ready
 watch(
   [credentialReceived, spaceInviteReceived],
   async ([hasCred, hasInvite]) => {
-    if (hasCred && hasInvite && spaceInviteKey.value) {
-      // Both received — execute community join
-      // Backend has the user's peer key stored from registration
-      let joined = await identityStore.joinCommunitySpace(spaceInviteKey.value);
+    if (!hasCred) return;
+
+    if (hasInvite && spaceInviteKey.value && !joinInProgress && processingStep.value !== 'done') {
+      // Both received — execute community join with full invite data
+      joinInProgress = true;
+      processingStep.value = 'joining';
+
+      let joined = await identityStore.joinCommunitySpace({
+        inviteKey: spaceInviteKey.value,
+        spaceId: spaceId.value ?? undefined,
+        readOnlyInviteKey: readOnlyInviteKey.value ?? undefined,
+        readOnlySpaceId: readOnlySpaceId.value ?? undefined,
+      });
 
       if (!joined) {
         // Retry a few times
         for (let i = 0; i < 5; i++) {
           await new Promise(r => setTimeout(r, 3000));
-          joined = await identityStore.joinCommunitySpace(spaceInviteKey.value!);
+          joined = await identityStore.joinCommunitySpace({
+            inviteKey: spaceInviteKey.value!,
+            spaceId: spaceId.value ?? undefined,
+            readOnlyInviteKey: readOnlyInviteKey.value ?? undefined,
+            readOnlySpaceId: readOnlySpaceId.value ?? undefined,
+          });
           if (joined) break;
         }
       }
 
+      processingStep.value = 'verifying';
+      if (joined) {
+        // Refresh spaces in store so dashboard guard passes
+        await identityStore.fetchUserSpaces();
+      }
+
+      processingStep.value = 'done';
       showWelcome.value = true;
       emit('approved', credential.value);
-    } else if (hasCred && !hasInvite) {
-      // Credential received but no space invite — check if we already have
-      // community access (admin/space-owner case where no invite is needed).
+    } else if (!hasInvite && !joinInProgress && processingStep.value === 'admitting') {
+      // Credential just received, invite not yet — advance step indicator
+      processingStep.value = 'invite';
+
+      // Check if we already have community access (admin/space-owner case)
       const hasAccess = await identityStore.verifyCommunityAccess();
       if (hasAccess) {
         console.log('[PendingApproval] Already have community access (space owner)');
+        joinInProgress = true;
+        processingStep.value = 'done';
         showWelcome.value = true;
         emit('approved', credential.value);
-        return;
       }
-      // Fallback: wait for space invite to arrive, then show welcome anyway
-      setTimeout(() => {
-        if (!spaceInviteReceived.value) {
-          console.log('[PendingApproval] Credential received without space invite, showing welcome');
-          showWelcome.value = true;
-          emit('approved', credential.value);
-        }
-      }, 10000);
+      // Otherwise, wait — polling continues and will find the space invite,
+      // which triggers this watcher again with [true, true]
     }
   }
 );
@@ -564,8 +640,8 @@ const resources = [
   background-color: rgba(var(--matou-destructive-rgb, 220, 38, 38), 0.1);
 }
 
-.processing-box {
-  background-color: rgba(30, 95, 116, 0.05);
+.processing-steps {
+  background-color: rgba(232, 244, 248, 0.5);
 }
 
 .aid-card {

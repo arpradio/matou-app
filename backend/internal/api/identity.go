@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/identity"
+	"github.com/matou-dao/backend/internal/types"
 )
 
 // IdentityHandler handles identity-related HTTP requests for per-user mode.
@@ -38,6 +41,7 @@ type SetIdentityRequest struct {
 	Mnemonic         string `json:"mnemonic"`
 	OrgAID           string `json:"orgAid,omitempty"`
 	CommunitySpaceID string `json:"communitySpaceId,omitempty"`
+	CredentialSAID   string `json:"credentialSaid,omitempty"`
 }
 
 // SetIdentityResponse is the response for POST /api/v1/identity/set.
@@ -50,12 +54,14 @@ type SetIdentityResponse struct {
 
 // GetIdentityResponse is the response for GET /api/v1/identity.
 type GetIdentityResponse struct {
-	Configured       bool   `json:"configured"`
-	AID              string `json:"aid,omitempty"`
-	PeerID           string `json:"peerId,omitempty"`
-	OrgAID           string `json:"orgAid,omitempty"`
-	CommunitySpaceID string `json:"communitySpaceId,omitempty"`
-	PrivateSpaceID   string `json:"privateSpaceId,omitempty"`
+	Configured               bool   `json:"configured"`
+	AID                      string `json:"aid,omitempty"`
+	PeerID                   string `json:"peerId,omitempty"`
+	OrgAID                   string `json:"orgAid,omitempty"`
+	CommunitySpaceID         string `json:"communitySpaceId,omitempty"`
+	CommunityReadOnlySpaceID string `json:"communityReadOnlySpaceId,omitempty"`
+	AdminSpaceID             string `json:"adminSpaceId,omitempty"`
+	PrivateSpaceID           string `json:"privateSpaceId,omitempty"`
 }
 
 // HandleSetIdentity handles POST /api/v1/identity/set.
@@ -176,6 +182,9 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		if err := h.userIdentity.SetPrivateSpaceID(privateSpaceID); err != nil {
 			fmt.Printf("Warning: failed to persist private space ID: %v\n", err)
 		}
+
+		// Seed private space with PrivateProfile type definition + initial profile
+		h.seedPrivateSpace(ctx, privateSpaceID, req.AID, req.CredentialSAID)
 	}
 
 	writeJSON(w, http.StatusOK, SetIdentityResponse{
@@ -183,6 +192,67 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		PeerID:         newPeerID,
 		PrivateSpaceID: privateSpaceID,
 	})
+}
+
+// seedPrivateSpace writes the PrivateProfile type definition and an initial
+// PrivateProfile into the user's private space.
+func (h *IdentityHandler) seedPrivateSpace(ctx context.Context, spaceID, userAID, credentialSAID string) {
+	client := h.sdkClient
+	if client == nil {
+		return
+	}
+
+	privateKeys, err := anysync.LoadSpaceKeySet(client.GetDataDir(), spaceID)
+	if err != nil {
+		fmt.Printf("Warning: failed to load private space keys for seeding: %v\n", err)
+		return
+	}
+
+	objMgr := h.spaceManager.ObjectTreeManager()
+
+	// 1. Write type definition
+	typeDef := types.PrivateProfileType()
+	typeDefBytes, err := json.Marshal(typeDef)
+	if err != nil {
+		fmt.Printf("Warning: failed to marshal PrivateProfile type def: %v\n", err)
+		return
+	}
+	typeDefID := fmt.Sprintf("typedef-PrivateProfile-%d", time.Now().UnixMilli())
+	typePayload := &anysync.ObjectPayload{
+		ID:        typeDefID,
+		Type:      "type_definition",
+		Data:      typeDefBytes,
+		Timestamp: time.Now().Unix(),
+		Version:   1,
+	}
+	if _, err := objMgr.AddObject(ctx, spaceID, typePayload, privateKeys.SigningKey); err != nil {
+		fmt.Printf("Warning: failed to seed PrivateProfile type def: %v\n", err)
+	}
+
+	// 2. Write initial PrivateProfile
+	if credentialSAID == "" {
+		return
+	}
+	profileData := map[string]interface{}{
+		"membershipCredentialSAID": credentialSAID,
+		"privacySettings":          map[string]interface{}{"allowEndorsements": true, "allowDirectMessages": true},
+		"appPreferences":           map[string]interface{}{"mode": "light", "language": "es"},
+	}
+	profileBytes, err := json.Marshal(profileData)
+	if err != nil {
+		fmt.Printf("Warning: failed to marshal PrivateProfile data: %v\n", err)
+		return
+	}
+	profilePayload := &anysync.ObjectPayload{
+		ID:        fmt.Sprintf("PrivateProfile-%s", userAID),
+		Type:      "PrivateProfile",
+		Data:      profileBytes,
+		Timestamp: time.Now().Unix(),
+		Version:   1,
+	}
+	if _, err := objMgr.AddObject(ctx, spaceID, profilePayload, privateKeys.SigningKey); err != nil {
+		fmt.Printf("Warning: failed to seed PrivateProfile: %v\n", err)
+	}
 }
 
 // HandleGetIdentity handles GET /api/v1/identity.
@@ -195,12 +265,14 @@ func (h *IdentityHandler) HandleGetIdentity(w http.ResponseWriter, r *http.Reque
 	}
 
 	writeJSON(w, http.StatusOK, GetIdentityResponse{
-		Configured:       h.userIdentity.IsConfigured(),
-		AID:              h.userIdentity.GetAID(),
-		PeerID:           h.userIdentity.GetPeerID(),
-		OrgAID:           h.userIdentity.GetOrgAID(),
-		CommunitySpaceID: h.userIdentity.GetCommunitySpaceID(),
-		PrivateSpaceID:   h.userIdentity.GetPrivateSpaceID(),
+		Configured:               h.userIdentity.IsConfigured(),
+		AID:                      h.userIdentity.GetAID(),
+		PeerID:                   h.userIdentity.GetPeerID(),
+		OrgAID:                   h.userIdentity.GetOrgAID(),
+		CommunitySpaceID:         h.userIdentity.GetCommunitySpaceID(),
+		CommunityReadOnlySpaceID: h.userIdentity.GetCommunityReadOnlySpaceID(),
+		AdminSpaceID:             h.userIdentity.GetAdminSpaceID(),
+		PrivateSpaceID:           h.userIdentity.GetPrivateSpaceID(),
 	})
 }
 

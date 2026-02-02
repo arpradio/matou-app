@@ -229,9 +229,11 @@ async function handleVerify() {
 
       const success = await submitRegistration({
         name: store.profile.name,
+        email: store.profile.email || undefined,
         bio: store.profile.bio,
         interests: store.profile.participationInterests,
         customInterests: store.profile.customInterests,
+        avatarFileRef: store.profile.avatarFileRef || undefined,
       });
 
       if (!success) {

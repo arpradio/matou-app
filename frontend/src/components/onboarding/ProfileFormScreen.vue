@@ -115,6 +115,20 @@
           </p>
         </div>
 
+        <!-- Email -->
+        <div class="space-y-2">
+          <label class="text-sm font-medium" for="email">Email Address</label>
+          <MInput
+            id="email"
+            v-model="formData.email"
+            type="email"
+            placeholder="your@email.com"
+          />
+          <p class="text-xs text-muted-foreground">
+            Optional. Used for community contact and notifications.
+          </p>
+        </div>
+
         <!-- Bio -->
         <div class="space-y-2">
           <label class="text-sm font-medium" for="bio">Why would you like to join us?</label>
@@ -225,6 +239,7 @@ import { useIdentityStore } from 'stores/identity';
 import { KERIClient } from 'src/lib/keri/client';
 import { generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
+import { uploadFile } from 'src/lib/api/client';
 
 const props = withDefaults(defineProps<{
   isClaim?: boolean;
@@ -237,6 +252,7 @@ const identityStore = useIdentityStore();
 
 const fileInput = ref<HTMLInputElement | null>(null);
 const avatarPreview = ref<string | null>(store.profile.avatarPreview);
+const avatarFile = ref<File | null>(null);
 
 // Loading state
 const isCreating = ref(false);
@@ -246,6 +262,7 @@ const loadingSubtext = ref('');
 
 const formData = ref({
   name: store.profile.name,
+  email: store.profile.email,
   bio: store.profile.bio,
   participationInterests: [...store.profile.participationInterests] as ParticipationInterest[],
   customInterests: store.profile.customInterests,
@@ -302,14 +319,16 @@ function handleFileSelect(event: Event) {
     };
     reader.readAsDataURL(file);
 
-    // Store file in profile
+    // Store file for upload and in profile
+    avatarFile.value = file;
     store.updateProfile({ avatar: file });
   }
 }
 
 function removeAvatar() {
   avatarPreview.value = null;
-  store.updateProfile({ avatar: null, avatarPreview: null });
+  avatarFile.value = null;
+  store.updateProfile({ avatar: null, avatarPreview: null, avatarFileRef: null });
   if (fileInput.value) {
     fileInput.value.value = '';
   }
@@ -343,12 +362,28 @@ async function handleSubmit() {
   // Save profile to store first
   store.updateProfile({
     name: formData.value.name.trim(),
+    email: formData.value.email.trim(),
     bio: formData.value.bio.trim(),
     avatarPreview: avatarPreview.value,
     participationInterests: formData.value.participationInterests,
     customInterests: formData.value.customInterests.trim(),
     hasAgreedToTerms: formData.value.hasAgreedToTerms,
   });
+
+  // Upload avatar if selected
+  if (avatarFile.value) {
+    try {
+      const result = await uploadFile(avatarFile.value);
+      if (result.fileRef) {
+        store.updateProfile({ avatarFileRef: result.fileRef });
+        console.log('[ProfileForm] Avatar uploaded, fileRef:', result.fileRef);
+      } else {
+        console.warn('[ProfileForm] Avatar upload failed:', result.error);
+      }
+    } catch (err) {
+      console.warn('[ProfileForm] Avatar upload deferred:', err);
+    }
+  }
 
   // In claim mode, skip identity creation — just save profile and continue
   if (props.isClaim) {

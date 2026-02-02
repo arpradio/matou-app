@@ -668,7 +668,8 @@ export class KERIClient {
     registryId: string,
     schemaId: string,
     recipientAid: string,
-    credentialData: Record<string, unknown>
+    credentialData: Record<string, unknown>,
+    grantMessage?: string
   ): Promise<{ said: string }> {
     if (!this.client) throw new Error('Not initialized');
 
@@ -711,6 +712,7 @@ export class KERIClient {
     const [grant, gsigs, end] = await this.client.ipex().grant({
       senderName: issuerAidName,
       recipient: recipientAid,
+      message: grantMessage || '',
       acdc: credResult.acdc,
       iss: credResult.iss,
       anc: credResult.anc,
@@ -1015,9 +1017,11 @@ export class KERIClient {
     admins: Array<{ aid: string; oobi?: string }>,
     registrationData: {
       name: string;
+      email?: string;
       bio: string;
       interests: string[];
       customInterests?: string;
+      avatarFileRef?: string;
       senderOOBI: string;
     },
     schemaSaid: string = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT'
@@ -1069,9 +1073,11 @@ export class KERIClient {
         const payload = {
           type: 'registration',
           name: registrationData.name,
+          email: registrationData.email || '',
           bio: registrationData.bio,
           interests: registrationData.interests,
           customInterests: registrationData.customInterests || '',
+          avatarFileRef: registrationData.avatarFileRef || '',
           senderOOBI: registrationData.senderOOBI,
           submittedAt: new Date().toISOString(),
         };

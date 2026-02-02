@@ -8,7 +8,7 @@ import { ref } from 'vue';
 import { useKERIClient, KERIClient } from 'src/lib/keri/client';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useAppStore } from 'stores/app';
-import { setBackendIdentity } from 'src/lib/api/client';
+import { setBackendIdentity, createOrUpdateProfile } from 'src/lib/api/client';
 
 export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'securing' | 'done' | 'error';
 
@@ -173,7 +173,7 @@ export function useClaimIdentity() {
             aid: aid.prefix,
             mnemonic: mnemonicStr,
             orgAid: appStore.orgAid ?? undefined,
-            communitySpaceId: undefined, // assigned after community join
+            communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
           });
           if (identityResult.success) {
             console.log('[ClaimIdentity] Backend identity set, peer:', identityResult.peerId,
@@ -191,6 +191,48 @@ export function useClaimIdentity() {
       onboardingStore.setUserAID(aid.prefix);
       if (!onboardingStore.profile.name) {
         onboardingStore.updateProfile({ name: aid.name });
+      }
+
+      // Create profiles after claiming identity
+      try {
+        const displayName = onboardingStore.profile.name || aid.name;
+        const now = new Date().toISOString();
+
+        // Get credential SAID from wallet for PrivateProfile
+        let credSAID = '';
+        try {
+          const creds = await client.credentials().list();
+          if (creds.length > 0) {
+            credSAID = creds[0].sad?.d || '';
+          }
+        } catch {
+          // Non-fatal
+        }
+
+        // PrivateProfile in personal space
+        await createOrUpdateProfile('PrivateProfile', {
+          membershipCredentialSAID: credSAID,
+          privacySettings: { allowEndorsements: true, allowDirectMessages: true },
+          appPreferences: { mode: 'light', language: 'es' },
+        }).catch(err => console.warn('[ClaimIdentity] PrivateProfile creation deferred:', err));
+
+        // SharedProfile in community space
+        await createOrUpdateProfile('SharedProfile', {
+          aid: aid.prefix,
+          displayName,
+          bio: onboardingStore.profile.bio || '',
+          avatar: onboardingStore.profile.avatarFileRef || '',
+          participationInterests: onboardingStore.profile.participationInterests || [],
+          customInterests: onboardingStore.profile.customInterests || '',
+          lastActiveAt: now,
+          createdAt: now,
+          updatedAt: now,
+          typeVersion: 1,
+        }).catch(err => console.warn('[ClaimIdentity] SharedProfile creation deferred:', err));
+
+        console.log('[ClaimIdentity] Profiles created');
+      } catch (profileErr) {
+        console.warn('[ClaimIdentity] Profile creation deferred:', profileErr);
       }
 
       // Done

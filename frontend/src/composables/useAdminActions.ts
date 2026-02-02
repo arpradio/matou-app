@@ -7,7 +7,7 @@ import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
 import { fetchOrgConfig } from 'src/api/config';
 import type { PendingRegistration } from './useRegistrationPolling';
-import { BACKEND_URL } from 'src/lib/api/client';
+import { BACKEND_URL, initMemberProfiles } from 'src/lib/api/client';
 
 // Membership credential schema
 const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
@@ -167,25 +167,16 @@ export function useAdminActions() {
         joinedAt: new Date().toISOString(),
       };
 
-      console.log('[AdminActions] Issuing membership credential to:', registration.applicantAid);
-      const credResult = await keriClient.issueCredential(
-        issuerAidName,
-        config.registry.id,
-        MEMBERSHIP_SCHEMA_SAID,
-        registration.applicantAid,
-        credentialData
-      );
-
-      console.log('[AdminActions] Credential issued:', credResult.said);
-
-      // 5. Invite user to community space (non-blocking)
+      // 4b. Generate space invite BEFORE issuing credential so we can embed
+      //     the invite data in the IPEX grant's message field (reliable delivery).
+      let grantMessage = '';
       try {
         const inviteResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/community/invite`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             recipientAid: registration.applicantAid,
-            credentialSaid: credResult.said,
+            credentialSaid: 'pending',
             schema: 'EMatouMembershipSchemaV1',
           }),
           signal: AbortSignal.timeout(10000),
@@ -196,35 +187,59 @@ export function useAdminActions() {
             success: boolean;
             communitySpaceId?: string;
             inviteKey?: string;
+            readOnlyInviteKey?: string;
+            readOnlySpaceId?: string;
           };
           console.log('[AdminActions] Invite generated:', inviteResult);
 
-          // Send space invite to user via KERI EXN
           if (inviteResult.inviteKey) {
-            try {
-              await keriClient.sendEXN(
-                issuerAidName,
-                registration.applicantAid,
-                '/matou/space/invite',
-                {
-                  type: 'space_invite',
-                  spaceId: inviteResult.communitySpaceId,
-                  inviteKey: inviteResult.inviteKey,
-                  spaceName: 'MATOU Community',
-                  issuedAt: new Date().toISOString(),
-                }
-              );
-              console.log('[AdminActions] Space invite EXN sent to:', registration.applicantAid);
-            } catch (exnErr) {
-              console.warn('[AdminActions] Failed to send space invite EXN:', exnErr);
-            }
+            // Embed invite data in the IPEX grant message for reliable delivery
+            grantMessage = JSON.stringify({
+              type: 'space_invite',
+              spaceId: inviteResult.communitySpaceId,
+              inviteKey: inviteResult.inviteKey,
+              readOnlyInviteKey: inviteResult.readOnlyInviteKey,
+              readOnlySpaceId: inviteResult.readOnlySpaceId,
+            });
           }
         } else {
           console.warn('[AdminActions] Space invitation failed:', await inviteResponse.text());
         }
       } catch (inviteErr) {
-        // Non-fatal - invitation can be retried via credential sync
         console.warn('[AdminActions] Space invitation deferred:', inviteErr);
+      }
+
+      console.log('[AdminActions] Issuing membership credential to:', registration.applicantAid);
+      const credResult = await keriClient.issueCredential(
+        issuerAidName,
+        config.registry.id,
+        MEMBERSHIP_SCHEMA_SAID,
+        registration.applicantAid,
+        credentialData,
+        grantMessage
+      );
+
+      console.log('[AdminActions] Credential issued:', credResult.said);
+
+      // 5b. Initialize member's CommunityProfile in read-only space
+      try {
+        const initResult = await initMemberProfiles({
+          memberAid: registration.applicantAid,
+          credentialSaid: credResult.said,
+          role: 'Member',
+          displayName: registration.profile?.name,
+          email: registration.profile?.email,
+          avatar: registration.profile?.avatarFileRef,
+          bio: registration.profile?.bio,
+          interests: registration.profile?.interests,
+        });
+        if (initResult.success) {
+          console.log('[AdminActions] CommunityProfile created for:', registration.applicantAid);
+        } else {
+          console.warn('[AdminActions] Failed to init member profiles:', initResult.error);
+        }
+      } catch (initErr) {
+        console.warn('[AdminActions] Failed to init member profiles:', initErr);
       }
 
       // 6. Mark ALL notifications for this applicant as read

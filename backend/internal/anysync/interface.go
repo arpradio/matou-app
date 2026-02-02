@@ -7,6 +7,8 @@ import (
 
 	"github.com/anyproto/any-sync/commonspace"
 	"github.com/anyproto/any-sync/commonspace/object/acl/list"
+	"github.com/anyproto/any-sync/net/pool"
+	"github.com/anyproto/any-sync/nodeconf"
 	"github.com/anyproto/any-sync/util/crypto"
 )
 
@@ -46,12 +48,25 @@ type AnySyncClient interface {
 	// GetPeerID returns the client's peer ID
 	GetPeerID() string
 
+	// GetSigningKey returns the client's signing private key (peer key)
+	GetSigningKey() crypto.PrivKey
+
 	// GetDataDir returns the data directory path
 	GetDataDir() string
 
 	// MakeSpaceShareable marks a space as shareable on the coordinator,
 	// enabling ACL invite operations. Must be called before CreateOpenInvite.
 	MakeSpaceShareable(ctx context.Context, spaceID string) error
+
+	// GetPool returns the connection pool for dRPC peer communication.
+	GetPool() pool.Pool
+
+	// GetNodeConf returns the node configuration service for peer discovery.
+	GetNodeConf() nodeconf.Service
+
+	// SetAccountFileLimits sets the file storage limit for an account identity
+	// on the coordinator. Must be called before uploading files via the filenode.
+	SetAccountFileLimits(ctx context.Context, identity string, limitBytes uint64) error
 
 	// Ping tests connectivity to the any-sync network
 	Ping() error

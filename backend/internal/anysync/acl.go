@@ -265,6 +265,28 @@ func (m *ACLManager) RevokeAccess(spaceID string, peerID string) error {
 	return nil
 }
 
+// CommunityReadOnlyACL creates an ACL policy for a community read-only space.
+// Members get read-only access; only the org owner can write.
+func CommunityReadOnlyACL(orgAID string) *ACLPolicy {
+	return &ACLPolicy{
+		PolicyType:        PolicyTypeCommunity,
+		OwnerAID:          orgAID,
+		DefaultPermission: PermissionRead,
+		OwnerPermission:   PermissionOwner,
+	}
+}
+
+// AdminACL creates an ACL policy for an admin-only space.
+// No default access; only the org owner has access.
+func AdminACL(orgAID string) *ACLPolicy {
+	return &ACLPolicy{
+		PolicyType:        PolicyTypePrivate,
+		OwnerAID:          orgAID,
+		DefaultPermission: PermissionNone,
+		OwnerPermission:   PermissionOwner,
+	}
+}
+
 // ACLPolicyForSpaceType returns the appropriate ACL policy for a space type.
 func ACLPolicyForSpaceType(spaceType string, ownerAID string, orgAID string) *ACLPolicy {
 	switch spaceType {
@@ -272,6 +294,10 @@ func ACLPolicyForSpaceType(spaceType string, ownerAID string, orgAID string) *AC
 		return PrivateACL(ownerAID)
 	case SpaceTypeCommunity:
 		return CommunityACL(orgAID, "EMatouMembershipSchemaV1")
+	case SpaceTypeCommunityReadOnly:
+		return CommunityReadOnlyACL(orgAID)
+	case SpaceTypeAdmin:
+		return AdminACL(orgAID)
 	default:
 		return PrivateACL(ownerAID)
 	}

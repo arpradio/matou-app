@@ -14,6 +14,8 @@ import { BACKEND_URL, setBackendIdentity } from 'src/lib/api/client';
 export interface OrgSetupConfig {
   orgName: string;
   adminName: string;
+  adminEmail?: string;
+  adminAvatar?: string; // fileRef from avatar upload
 }
 
 export interface OrgSetupResult {
@@ -23,6 +25,8 @@ export interface OrgSetupResult {
   credentialSaid: string;
   mnemonic: string[];
   communitySpaceId?: string;
+  readOnlySpaceId?: string;
+  adminSpaceId?: string;
   privateSpaceId?: string;
 }
 
@@ -150,11 +154,15 @@ export function useOrgSetup() {
       progress.value = 'Configuring backend identity...';
       let adminPrivateSpaceId: string | undefined;
 
+      // Clear any stale identity from a previous org setup run
+      await fetch(`${BACKEND_URL}/api/v1/identity`, { method: 'DELETE' }).catch(() => {});
+
       try {
         const identityResult = await setBackendIdentity({
           aid: adminAid.prefix,
           mnemonic: mnemonic,
           orgAid: orgAid.prefix,
+          credentialSaid: credential.said,
         });
         if (identityResult.success) {
           adminPrivateSpaceId = identityResult.privateSpaceId;
@@ -173,6 +181,9 @@ export function useOrgSetup() {
       progress.value = 'Creating community space...';
       let communitySpaceId: string | undefined;
 
+      let readOnlySpaceId: string | undefined;
+      let adminSpaceId: string | undefined;
+
       try {
         const spaceResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/community`, {
           method: 'POST',
@@ -180,14 +191,32 @@ export function useOrgSetup() {
           body: JSON.stringify({
             orgAid: orgAid.prefix,
             orgName: config.orgName,
+            adminAid: adminAid.prefix,
+            adminName: config.adminName,
+            adminEmail: config.adminEmail,
+            adminAvatar: config.adminAvatar,
+            credentialSaid: credential.said,
           }),
-          signal: AbortSignal.timeout(10000),
+          signal: AbortSignal.timeout(15000),
         });
 
         if (spaceResponse.ok) {
-          const spaceResult = await spaceResponse.json() as { spaceId: string; success: boolean };
-          communitySpaceId = spaceResult.spaceId;
-          console.log('[OrgSetup] Created community space:', spaceResult.spaceId);
+          const spaceResult = await spaceResponse.json() as {
+            success: boolean;
+            communitySpaceId: string;
+            readOnlySpaceId: string;
+            adminSpaceId: string;
+            objects: Array<{ spaceId: string; objectId: string; headId: string; type: string }>;
+            spaceId: string; // backward compat
+          };
+          communitySpaceId = spaceResult.communitySpaceId || spaceResult.spaceId;
+          readOnlySpaceId = spaceResult.readOnlySpaceId;
+          adminSpaceId = spaceResult.adminSpaceId;
+          console.log('[OrgSetup] Created spaces — community:', communitySpaceId,
+            'readonly:', readOnlySpaceId, 'admin:', adminSpaceId);
+          if (spaceResult.objects?.length) {
+            console.log('[OrgSetup] Seeded objects:', spaceResult.objects.map(o => `${o.type}@${o.spaceId}`).join(', '));
+          }
 
           // Update backend identity with the community space ID
           await setBackendIdentity({
@@ -228,14 +257,20 @@ export function useOrgSetup() {
           name: registryName,
         },
         communitySpaceId,
-        adminPrivateSpaceId,
+        readOnlySpaceId,
+        adminSpaceId,
         generated: new Date().toISOString(),
       };
 
       await saveOrgConfig(orgConfig);
       console.log('[OrgSetup] Config saved to server');
 
-      // Step 12: Store admin passcode and mnemonic in localStorage
+      // Step 12: Admin profiles are now seeded by the backend during space creation
+      // (type definitions + profiles written to each space's ObjectTree).
+      // No additional frontend profile creation needed.
+      console.log('[OrgSetup] Admin profiles seeded by backend during space creation');
+
+      // Step 13: Store admin passcode and mnemonic in localStorage
       localStorage.setItem('matou_passcode', adminPasscode);
       localStorage.setItem('matou_mnemonic', mnemonic);
       localStorage.setItem('matou_admin_aid', adminAid.prefix);
@@ -261,6 +296,8 @@ export function useOrgSetup() {
         credentialSaid: credential.said,
         mnemonic: mnemonicWords,
         communitySpaceId,
+        readOnlySpaceId,
+        adminSpaceId,
         privateSpaceId: adminPrivateSpaceId,
       };
 

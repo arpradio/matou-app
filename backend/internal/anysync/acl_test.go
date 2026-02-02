@@ -12,6 +12,8 @@ import (
 	"github.com/anyproto/any-sync/commonspace/object/acl/list"
 	"github.com/anyproto/any-sync/commonspace/object/acl/syncacl/mock_syncacl"
 	"github.com/anyproto/any-sync/consensus/consensusproto"
+	"github.com/anyproto/any-sync/net/pool"
+	"github.com/anyproto/any-sync/nodeconf"
 	"github.com/anyproto/any-sync/util/crypto"
 	"go.uber.org/mock/gomock"
 )
@@ -441,9 +443,15 @@ func (c *testACLClient) MakeSpaceShareable(_ context.Context, _ string) error { 
 func (c *testACLClient) GetNetworkID() string     { return "" }
 func (c *testACLClient) GetCoordinatorURL() string { return "" }
 func (c *testACLClient) GetPeerID() string         { return "" }
-func (c *testACLClient) GetDataDir() string        { return "" }
-func (c *testACLClient) Ping() error               { return nil }
-func (c *testACLClient) Close() error              { return nil }
+func (c *testACLClient) GetDataDir() string              { return "" }
+func (c *testACLClient) GetSigningKey() crypto.PrivKey   { return nil }
+func (c *testACLClient) GetPool() pool.Pool              { return nil }
+func (c *testACLClient) GetNodeConf() nodeconf.Service { return nil }
+func (c *testACLClient) SetAccountFileLimits(ctx context.Context, identity string, limitBytes uint64) error {
+	return nil
+}
+func (c *testACLClient) Ping() error { return nil }
+func (c *testACLClient) Close() error                    { return nil }
 
 // =============================================================================
 // Application-layer ACL policy tests (existing)

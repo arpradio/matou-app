@@ -30,6 +30,32 @@ type CredentialPayload struct {
 	Timestamp int64           `json:"timestamp"`
 }
 
+// TreeCache is a thread-safe cache of ObjectTrees indexed by space ID.
+// It is shared between CredentialTreeManager and ObjectTreeManager so both
+// can read/write to the same tree (using different DataType values).
+type TreeCache struct {
+	trees sync.Map // spaceID → objecttree.ObjectTree
+}
+
+// NewTreeCache creates a new empty TreeCache.
+func NewTreeCache() *TreeCache {
+	return &TreeCache{}
+}
+
+// Load returns the cached tree for a space, or (nil, false) if not cached.
+func (c *TreeCache) Load(spaceID string) (objecttree.ObjectTree, bool) {
+	val, ok := c.trees.Load(spaceID)
+	if !ok {
+		return nil, false
+	}
+	return val.(objecttree.ObjectTree), true
+}
+
+// Store caches a tree for a space.
+func (c *TreeCache) Store(spaceID string, tree objecttree.ObjectTree) {
+	c.trees.Store(spaceID, tree)
+}
+
 // CredentialTreeManager manages credential storage in ObjectTrees.
 // Each space has one credential tree for storing KERI credentials as
 // encrypted, signed CRDT changes. Peers must join the space via ACL
@@ -37,15 +63,28 @@ type CredentialPayload struct {
 type CredentialTreeManager struct {
 	client     AnySyncClient
 	keyManager *PeerKeyManager
-	trees      sync.Map // spaceID → objecttree.ObjectTree
+	trees      *TreeCache
 }
 
-// NewCredentialTreeManager creates a new CredentialTreeManager.
-func NewCredentialTreeManager(client AnySyncClient, keyManager *PeerKeyManager) *CredentialTreeManager {
+// NewCredentialTreeManager creates a new CredentialTreeManager with a shared TreeCache.
+// If cache is nil, a new one is created.
+func NewCredentialTreeManager(client AnySyncClient, keyManager *PeerKeyManager, cache ...*TreeCache) *CredentialTreeManager {
+	var tc *TreeCache
+	if len(cache) > 0 && cache[0] != nil {
+		tc = cache[0]
+	} else {
+		tc = NewTreeCache()
+	}
 	return &CredentialTreeManager{
 		client:     client,
 		keyManager: keyManager,
+		trees:      tc,
 	}
+}
+
+// TreeCache returns the shared tree cache.
+func (m *CredentialTreeManager) TreeCache() *TreeCache {
+	return m.trees
 }
 
 // CreateCredentialTree creates a new ObjectTree in a space for storing credentials.
@@ -90,6 +129,8 @@ func (m *CredentialTreeManager) CreateCredentialTree(ctx context.Context, spaceI
 
 // AddCredential adds a credential as a signed change to the space's credential
 // tree. If no tree exists yet, one is created automatically.
+// NOTE: This reuses the shared TreeCache — both credentials and objects may
+// coexist in the same tree, distinguished by their DataType.
 func (m *CredentialTreeManager) AddCredential(ctx context.Context, spaceID string, cred *CredentialPayload, signingKey crypto.PrivKey) (string, error) {
 	tree, err := m.getOrCreateTree(ctx, spaceID, signingKey)
 	if err != nil {
@@ -128,19 +169,17 @@ func (m *CredentialTreeManager) AddCredential(ctx context.Context, spaceID strin
 // discovers credential trees from the space storage (supports reading trees
 // created by other peers and synced via tree nodes).
 func (m *CredentialTreeManager) ReadCredentials(ctx context.Context, spaceID string) ([]*CredentialPayload, error) {
-	val, ok := m.trees.Load(spaceID)
+	tree, ok := m.trees.Load(spaceID)
 	if !ok {
 		// Try to discover and load a credential tree from the space storage
 		if err := m.discoverTree(ctx, spaceID); err != nil {
 			return nil, fmt.Errorf("no credential tree for space %s: %w", spaceID, err)
 		}
-		val, ok = m.trees.Load(spaceID)
+		tree, ok = m.trees.Load(spaceID)
 		if !ok {
 			return nil, fmt.Errorf("no credential tree for space %s", spaceID)
 		}
 	}
-
-	tree := val.(objecttree.ObjectTree)
 	tree.Lock()
 	defer tree.Unlock()
 
@@ -178,16 +217,17 @@ func (m *CredentialTreeManager) ReadCredentials(ctx context.Context, spaceID str
 
 // GetTreeID returns the ID of the credential tree for a space, or empty string if none.
 func (m *CredentialTreeManager) GetTreeID(spaceID string) string {
-	val, ok := m.trees.Load(spaceID)
+	tree, ok := m.trees.Load(spaceID)
 	if !ok {
 		return ""
 	}
-	tree := val.(objecttree.ObjectTree)
 	return tree.Id()
 }
 
-// discoverTree discovers and loads a credential tree from the space storage.
-// This is used when another peer created the tree and it was synced via tree nodes.
+// discoverTree discovers and loads a tree from the space storage that contains
+// credentials or objects. This is used when another peer created the tree and
+// it was synced via tree nodes. Both CredentialChangeType and ObjectChangeType
+// are recognized so that a shared tree can be discovered by either manager.
 func (m *CredentialTreeManager) discoverTree(ctx context.Context, spaceID string) error {
 	if m.client == nil {
 		return fmt.Errorf("no client configured")
@@ -205,24 +245,24 @@ func (m *CredentialTreeManager) discoverTree(ctx context.Context, spaceID string
 		if err != nil {
 			continue
 		}
-		// Check if this is a credential tree by inspecting change types.
+		// Check if this is a MATOU tree by inspecting change types.
 		// Root changes store the type in Model.(*TreeChangeInfo).ChangeType,
 		// while non-root changes store it in Change.DataType.
 		tree.Lock()
-		isCredTree := false
+		isMatouTree := false
 		_ = tree.IterateRoot(
 			func(change *objecttree.Change, decrypted []byte) (any, error) {
 				return nil, nil
 			},
 			func(change *objecttree.Change) bool {
-				if change.DataType == CredentialChangeType {
-					isCredTree = true
+				if change.DataType == CredentialChangeType || change.DataType == ObjectChangeType {
+					isMatouTree = true
 					return false
 				}
 				// Check root change's ChangeType via Model
 				if info, ok := change.Model.(*treechangeproto.TreeChangeInfo); ok {
-					if info.ChangeType == CredentialChangeType {
-						isCredTree = true
+					if info.ChangeType == CredentialChangeType || info.ChangeType == ObjectChangeType {
+						isMatouTree = true
 						return false
 					}
 				}
@@ -230,7 +270,7 @@ func (m *CredentialTreeManager) discoverTree(ctx context.Context, spaceID string
 			},
 		)
 		tree.Unlock()
-		if isCredTree {
+		if isMatouTree {
 			m.trees.Store(spaceID, tree)
 			return nil
 		}
@@ -240,8 +280,8 @@ func (m *CredentialTreeManager) discoverTree(ctx context.Context, spaceID string
 
 // getOrCreateTree returns the existing credential tree for a space, or creates one.
 func (m *CredentialTreeManager) getOrCreateTree(ctx context.Context, spaceID string, signingKey crypto.PrivKey) (objecttree.ObjectTree, error) {
-	if val, ok := m.trees.Load(spaceID); ok {
-		return val.(objecttree.ObjectTree), nil
+	if tree, ok := m.trees.Load(spaceID); ok {
+		return tree, nil
 	}
 
 	_, err := m.CreateCredentialTree(ctx, spaceID, signingKey)
@@ -249,10 +289,10 @@ func (m *CredentialTreeManager) getOrCreateTree(ctx context.Context, spaceID str
 		return nil, err
 	}
 
-	val, ok := m.trees.Load(spaceID)
+	tree, ok := m.trees.Load(spaceID)
 	if !ok {
 		return nil, fmt.Errorf("tree not found after creation for space %s", spaceID)
 	}
 
-	return val.(objecttree.ObjectTree), nil
+	return tree, nil
 }

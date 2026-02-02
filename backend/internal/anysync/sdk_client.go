@@ -30,8 +30,10 @@ import (
 	"github.com/anyproto/any-sync/commonspace/spacesyncproto"
 	"github.com/anyproto/any-sync/commonspace/sync/objectsync/objectmessages"
 	"github.com/anyproto/any-sync/commonspace/syncstatus"
+	"github.com/anyproto/any-sync/consensus/consensusclient"
 	"github.com/anyproto/any-sync/consensus/consensusproto"
 	"github.com/anyproto/any-sync/coordinator/coordinatorclient"
+	"github.com/anyproto/any-sync/coordinator/coordinatorproto"
 	"github.com/anyproto/any-sync/net/peer"
 	"github.com/anyproto/any-sync/net/peerservice"
 	"github.com/anyproto/any-sync/net/pool"
@@ -177,9 +179,10 @@ func (c *SDKClient) initFullSDK() error {
 	c.app.Register(streampool.New())
 	c.app.Register(syncqueues.New())
 
-	// Layer 5: Coordination and node client
+	// Layer 5: Coordination, node client, and consensus client
 	c.app.Register(coordinatorclient.New())
 	c.app.Register(nodeclient.New())
+	c.app.Register(consensusclient.New())
 
 	// Layer 6: Space services (peer manager, tree manager, then space service)
 	c.app.Register(c.storageProvider)
@@ -270,7 +273,7 @@ func (c *SDKClient) CreateSpaceWithKeys(ctx context.Context, ownerAID string, sp
 	payload := spacepayloads.SpaceCreatePayload{
 		SigningKey:     keys.SigningKey,
 		MasterKey:      keys.MasterKey,
-		SpaceType:      spaceType,
+		SpaceType:      "", // coordinator rejects custom types; keep app-level type in metadata
 		ReplicationKey: repKey,
 		SpacePayload:   []byte(ownerAID),
 		ReadKey:        keys.ReadKey,
@@ -287,8 +290,24 @@ func (c *SDKClient) CreateSpaceWithKeys(ctx context.Context, ownerAID string, sp
 	// Open and initialize the space via shared resolver so all components
 	// use the same Space instance
 	resolver := c.app.MustComponent(spaceResolverCName).(*sdkSpaceResolver)
-	if _, err := resolver.GetSpace(ctx, spaceID); err != nil {
+	sp, err := resolver.GetSpace(ctx, spaceID)
+	if err != nil {
 		return nil, fmt.Errorf("opening newly created space: %w", err)
+	}
+
+	// Push the initial ACL record to the consensus node so that the filenode
+	// (and other nodes) can verify space ownership for file operations.
+	// SpaceService.CreateSpace only stores the ACL locally; the consensus node
+	// log must be created explicitly via AddLog.
+	acl := sp.Acl()
+	acl.RLock()
+	aclRoot := acl.Root()
+	aclId := acl.Id()
+	acl.RUnlock()
+
+	consClient := c.app.MustComponent(consensusclient.CName).(consensusclient.Service)
+	if err := consClient.AddLog(ctx, aclId, aclRoot); err != nil {
+		fmt.Printf("[any-sync SDK] Warning: failed to push ACL to consensus node: %v\n", err)
 	}
 
 	// Persist keys
@@ -341,7 +360,7 @@ func (c *SDKClient) DeriveSpace(ctx context.Context, ownerAID string, spaceType 
 	payload := spacepayloads.SpaceDerivePayload{
 		SigningKey:   signingKey,
 		MasterKey:    masterKey,
-		SpaceType:    spaceType,
+		SpaceType:    "", // coordinator rejects custom types
 		SpacePayload: []byte(ownerAID),
 	}
 
@@ -381,7 +400,7 @@ func (c *SDKClient) DeriveSpaceID(ctx context.Context, ownerAID string, spaceTyp
 	payload := spacepayloads.SpaceDerivePayload{
 		SigningKey:   signingKey,
 		MasterKey:    masterKey,
-		SpaceType:    spaceType,
+		SpaceType:    "", // coordinator rejects custom types
 		SpacePayload: []byte(ownerAID),
 	}
 
@@ -451,6 +470,36 @@ func (c *SDKClient) MakeSpaceShareable(ctx context.Context, spaceID string) erro
 	}
 
 	fmt.Printf("[any-sync SDK] MakeSpaceShareable: %s\n", spaceID)
+	return nil
+}
+
+// SetAccountFileLimits sets the file storage limit for an account identity on
+// the coordinator. This must be called before uploading files via the filenode,
+// as the filenode checks account limits before accepting BlockPush.
+//
+// Note: In production any-sync networks, this may require the caller to be a
+// "network config member" (admin node). In test networks, it may be allowed
+// from any authenticated peer.
+func (c *SDKClient) SetAccountFileLimits(ctx context.Context, identity string, limitBytes uint64) error {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.initialized {
+		return fmt.Errorf("client not initialized")
+	}
+
+	if err := c.coordinator.AccountLimitsSet(ctx, &coordinatorproto.AccountLimitsSetRequest{
+		Identity:              identity,
+		Reason:                "matou-file-storage",
+		FileStorageLimitBytes: limitBytes,
+		SpaceMembersRead:      1000,
+		SpaceMembersWrite:     1000,
+		SharedSpacesLimit:     100,
+	}); err != nil {
+		return fmt.Errorf("setting account file limits: %w", err)
+	}
+
+	fmt.Printf("[any-sync SDK] SetAccountFileLimits: identity=%s limit=%d bytes\n", identity[:20]+"...", limitBytes)
 	return nil
 }
 
@@ -531,6 +580,16 @@ func (c *SDKClient) GetPeerID() string {
 		return c.peerKeyManager.GetPeerID()
 	}
 	return ""
+}
+
+// GetPool returns the connection pool for dRPC peer communication.
+func (c *SDKClient) GetPool() pool.Pool {
+	return c.app.MustComponent(pool.CName).(pool.Pool)
+}
+
+// GetNodeConf returns the node configuration service for peer discovery.
+func (c *SDKClient) GetNodeConf() nodeconf.Service {
+	return c.app.MustComponent(nodeconf.CName).(nodeconf.Service)
 }
 
 // GetSigningKey returns the client's signing key (used as the ACL identity).

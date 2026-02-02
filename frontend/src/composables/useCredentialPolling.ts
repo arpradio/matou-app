@@ -53,6 +53,8 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
   const spaceInviteReceived = ref(false);
   const spaceInviteKey = ref<string | null>(null);
   const spaceId = ref<string | null>(null);
+  const readOnlyInviteKey = ref<string | null>(null);
+  const readOnlySpaceId = ref<string | null>(null);
 
   // Rejection and message state
   const rejectionReceived = ref(false);
@@ -161,45 +163,65 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     try {
       // First, check if credentials are already in the wallet
       // This handles the case where admin issues credential to themselves (same agent)
-      try {
-        const credentials = await client.credentials().list();
-        console.log('[CredentialPolling] Existing credentials check:', credentials.length);
-        if (credentials.length > 0) {
-          console.log('[CredentialPolling] Credential already in wallet:', credentials[0]);
-          credential.value = credentials[0];
-          credentialReceived.value = true;
-          grantReceived.value = true; // Mark grant as received too
-          // Sync to backend for space routing (non-blocking)
-          syncCredentialToBackend();
-          stopPolling();
-          return;
+      if (!credentialReceived.value) {
+        try {
+          const credentials = await client.credentials().list();
+          console.log('[CredentialPolling] Existing credentials check:', credentials.length);
+          if (credentials.length > 0) {
+            console.log('[CredentialPolling] Credential already in wallet:', credentials[0]);
+            credential.value = credentials[0];
+            credentialReceived.value = true;
+            grantReceived.value = true;
+            syncCredentialToBackend();
+            // Don't stop polling — still need to wait for space invite
+          }
+        } catch (credErr) {
+          console.log('[CredentialPolling] Could not check credentials:', credErr);
         }
-      } catch (credErr) {
-        console.log('[CredentialPolling] Could not check credentials:', credErr);
       }
 
-      // If no credentials, check for grant notifications
+      // Check notifications for grants, invites, rejections, and messages
       const notifications = await client.notifications().list();
       console.log('[CredentialPolling] Raw notifications response:', JSON.stringify(notifications, null, 2));
 
-      // Check for grant notifications
-      const grants = notifications.notes?.filter(
-        (n: IPEXNotification) => n.a?.r === '/exn/ipex/grant' && !n.r
-      ) ?? [];
+      // Check for grant notifications (only if credential not yet received)
+      if (!credentialReceived.value) {
+        const grants = notifications.notes?.filter(
+          (n: IPEXNotification) => n.a?.r === '/exn/ipex/grant' && !n.r
+        ) ?? [];
 
-      console.log('[CredentialPolling] Filtered grants:', grants.length, grants);
+        console.log('[CredentialPolling] Filtered grants:', grants.length, grants);
 
-      if (grants.length > 0) {
-        console.log('[CredentialPolling] Grant detected:', grants[0]);
-        grantReceived.value = true;
-        isProcessingGrant = true;
+        if (grants.length > 0) {
+          console.log('[CredentialPolling] Grant detected:', grants[0]);
+          grantReceived.value = true;
+          isProcessingGrant = true;
 
-        try {
-          await admitGrant(grants[0]);
-          // After admitting, start polling for credential
-          await pollForCredential();
-        } finally {
-          isProcessingGrant = false;
+          // Extract space invite data from grant message (embedded by admin)
+          const grantMsg = grants[0].a?.m;
+          if (grantMsg && !spaceInviteReceived.value) {
+            try {
+              const inviteData = JSON.parse(grantMsg);
+              if (inviteData.type === 'space_invite' && inviteData.inviteKey) {
+                console.log('[CredentialPolling] Space invite found in grant message:', inviteData);
+                spaceInviteReceived.value = true;
+                spaceInviteKey.value = inviteData.inviteKey;
+                spaceId.value = inviteData.spaceId || null;
+                readOnlyInviteKey.value = inviteData.readOnlyInviteKey || null;
+                readOnlySpaceId.value = inviteData.readOnlySpaceId || null;
+              }
+            } catch {
+              // Not JSON or not invite data — ignore
+            }
+          }
+
+          try {
+            await admitGrant(grants[0]);
+            // After admitting, poll for credential to appear in wallet
+            await pollForCredential();
+          } finally {
+            isProcessingGrant = false;
+          }
         }
       }
 
@@ -267,11 +289,19 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
           spaceInviteReceived.value = true;
           spaceInviteKey.value = payload.inviteKey as string;
           spaceId.value = payload.spaceId as string;
+          readOnlyInviteKey.value = (payload.readOnlyInviteKey as string) || null;
+          readOnlySpaceId.value = (payload.readOnlySpaceId as string) || null;
           await client.notifications().mark(spaceInvites[0].i);
           console.log('[CredentialPolling] Space invite received');
         } catch (inviteErr) {
           console.warn('[CredentialPolling] Failed to fetch space invite:', inviteErr);
         }
+      }
+
+      // Stop polling once both credential and space invite have been received
+      if (credentialReceived.value && spaceInviteReceived.value) {
+        console.log('[CredentialPolling] Both credential and space invite received — stopping');
+        stopPolling();
       }
 
       // Reset error counter on successful poll
@@ -365,8 +395,7 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
 
     // Check immediately first
     if (await checkCredential()) {
-      stopPolling();
-      return;
+      return; // Don't stop polling — space invite may still be pending
     }
 
     // Then poll with interval
@@ -378,8 +407,7 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
 
         if (await checkCredential()) {
           clearInterval(credentialTimer);
-          stopPolling();
-          resolve();
+          resolve(); // Don't stop polling — space invite may still be pending
           return;
         }
 
@@ -522,6 +550,8 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     spaceInviteReceived,
     spaceInviteKey,
     spaceId,
+    readOnlyInviteKey,
+    readOnlySpaceId,
     rejectionReceived,
     rejectionInfo,
     adminMessages,

@@ -97,7 +97,9 @@ const handleApproved = (credential: any) => {
   console.log('[Onboarding] Credential approved:', credential);
 };
 
-const handleContinueToDashboard = () => {
+const handleContinueToDashboard = async () => {
+  // Ensure backend has community space ID before navigating
+  await identityStore.fetchUserSpaces();
   store.navigateTo('main');
 };
 

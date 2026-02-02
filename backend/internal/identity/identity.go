@@ -20,19 +20,23 @@ type UserIdentity struct {
 	dataDir  string
 
 	// Runtime config fields (set by frontend after fetching org config)
-	orgAID           string
-	communitySpaceID string
-	privateSpaceID   string
+	orgAID                   string
+	communitySpaceID         string
+	communityReadOnlySpaceID string
+	adminSpaceID             string
+	privateSpaceID           string
 }
 
 // persistedIdentity is the JSON structure written to disk.
 type persistedIdentity struct {
-	AID              string `json:"aid"`
-	Mnemonic         string `json:"mnemonic"`
-	PeerID           string `json:"peerId,omitempty"`
-	OrgAID           string `json:"orgAid,omitempty"`
-	CommunitySpaceID string `json:"communitySpaceId,omitempty"`
-	PrivateSpaceID   string `json:"privateSpaceId,omitempty"`
+	AID                      string `json:"aid"`
+	Mnemonic                 string `json:"mnemonic"`
+	PeerID                   string `json:"peerId,omitempty"`
+	OrgAID                   string `json:"orgAid,omitempty"`
+	CommunitySpaceID         string `json:"communitySpaceId,omitempty"`
+	CommunityReadOnlySpaceID string `json:"communityReadOnlySpaceId,omitempty"`
+	AdminSpaceID             string `json:"adminSpaceId,omitempty"`
+	PrivateSpaceID           string `json:"privateSpaceId,omitempty"`
 }
 
 // New creates a new UserIdentity bound to the given data directory.
@@ -116,6 +120,38 @@ func (u *UserIdentity) GetCommunitySpaceID() string {
 	return u.communitySpaceID
 }
 
+// GetCommunityReadOnlySpaceID returns the community read-only space ID.
+func (u *UserIdentity) GetCommunityReadOnlySpaceID() string {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.communityReadOnlySpaceID
+}
+
+// SetCommunityReadOnlySpaceID stores the community read-only space ID.
+func (u *UserIdentity) SetCommunityReadOnlySpaceID(spaceID string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	u.communityReadOnlySpaceID = spaceID
+	return u.persist()
+}
+
+// GetAdminSpaceID returns the admin space ID.
+func (u *UserIdentity) GetAdminSpaceID() string {
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	return u.adminSpaceID
+}
+
+// SetAdminSpaceID stores the admin space ID.
+func (u *UserIdentity) SetAdminSpaceID(spaceID string) error {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+
+	u.adminSpaceID = spaceID
+	return u.persist()
+}
+
 // GetPrivateSpaceID returns the user's private space ID.
 func (u *UserIdentity) GetPrivateSpaceID() string {
 	u.mu.RLock()
@@ -140,6 +176,8 @@ func (u *UserIdentity) Clear() error {
 	u.peerID = ""
 	u.orgAID = ""
 	u.communitySpaceID = ""
+	u.communityReadOnlySpaceID = ""
+	u.adminSpaceID = ""
 	u.privateSpaceID = ""
 
 	path := u.filePath()
@@ -157,12 +195,14 @@ func (u *UserIdentity) filePath() string {
 // persist writes the current state to disk. Caller must hold u.mu.
 func (u *UserIdentity) persist() error {
 	data := persistedIdentity{
-		AID:              u.aid,
-		Mnemonic:         u.mnemonic,
-		PeerID:           u.peerID,
-		OrgAID:           u.orgAID,
-		CommunitySpaceID: u.communitySpaceID,
-		PrivateSpaceID:   u.privateSpaceID,
+		AID:                      u.aid,
+		Mnemonic:                 u.mnemonic,
+		PeerID:                   u.peerID,
+		OrgAID:                   u.orgAID,
+		CommunitySpaceID:         u.communitySpaceID,
+		CommunityReadOnlySpaceID: u.communityReadOnlySpaceID,
+		AdminSpaceID:             u.adminSpaceID,
+		PrivateSpaceID:           u.privateSpaceID,
 	}
 
 	bytes, err := json.MarshalIndent(data, "", "  ")
@@ -200,5 +240,7 @@ func (u *UserIdentity) load() {
 	u.peerID = data.PeerID
 	u.orgAID = data.OrgAID
 	u.communitySpaceID = data.CommunitySpaceID
+	u.communityReadOnlySpaceID = data.CommunityReadOnlySpaceID
+	u.adminSpaceID = data.AdminSpaceID
 	u.privateSpaceID = data.PrivateSpaceID
 }

@@ -40,8 +40,10 @@ export interface OrgConfig {
   };
   // any-sync community space ID (created during org setup)
   communitySpaceId?: string;
-  // any-sync admin private space ID (created during org setup with mnemonic-derived keys)
-  adminPrivateSpaceId?: string;
+  // any-sync community read-only space ID
+  readOnlySpaceId?: string;
+  // any-sync admin space ID
+  adminSpaceId?: string;
   generated: string;
 }
 

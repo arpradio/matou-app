@@ -21,6 +21,8 @@ export const useIdentityStore = defineStore('identity', () => {
   const initError = ref<string | null>(null);
   const privateSpaceId = ref<string | null>(null);
   const communitySpaceId = ref<string | null>(null);
+  const communityReadOnlySpaceId = ref<string | null>(null);
+  const adminSpaceId = ref<string | null>(null);
   const privateKeysAvailable = ref(false);
   const communityKeysAvailable = ref(false);
   const spacesLoaded = ref(false);
@@ -132,12 +134,16 @@ export const useIdentityStore = defineStore('identity', () => {
       const spaces = await getUserSpaces(currentAID.value.prefix);
       privateSpaceId.value = spaces.privateSpace?.spaceId ?? null;
       communitySpaceId.value = spaces.communitySpace?.spaceId ?? null;
+      communityReadOnlySpaceId.value = spaces.communityReadOnlySpace?.spaceId ?? null;
+      adminSpaceId.value = spaces.adminSpace?.spaceId ?? null;
       privateKeysAvailable.value = spaces.privateSpace?.keysAvailable ?? false;
       communityKeysAvailable.value = spaces.communitySpace?.keysAvailable ?? false;
       spacesLoaded.value = true;
       console.log('[IdentityStore] Spaces loaded:', {
         private: privateSpaceId.value,
         community: communitySpaceId.value,
+        communityReadOnly: communityReadOnlySpaceId.value,
+        admin: adminSpaceId.value,
         privateKeys: privateKeysAvailable.value,
         communityKeys: communityKeysAvailable.value,
       });
@@ -161,15 +167,24 @@ export const useIdentityStore = defineStore('identity', () => {
     }
   }
 
-  async function joinCommunitySpace(inviteKey: string): Promise<boolean> {
+  async function joinCommunitySpace(params: {
+    inviteKey: string;
+    spaceId?: string;
+    readOnlyInviteKey?: string;
+    readOnlySpaceId?: string;
+  }): Promise<boolean> {
     if (!currentAID.value?.prefix) return false;
     try {
       const result = await apiJoinCommunity({
         userAid: currentAID.value.prefix,
-        inviteKey,
+        inviteKey: params.inviteKey,
+        spaceId: params.spaceId,
+        readOnlyInviteKey: params.readOnlyInviteKey,
+        readOnlySpaceId: params.readOnlySpaceId,
       });
       if (result.success) {
         communityAccessVerified.value = true;
+        if (result.spaceId) communitySpaceId.value = result.spaceId;
       }
       return result.success;
     } catch {
@@ -195,6 +210,8 @@ export const useIdentityStore = defineStore('identity', () => {
     initError,
     privateSpaceId,
     communitySpaceId,
+    communityReadOnlySpaceId,
+    adminSpaceId,
     privateKeysAvailable,
     communityKeysAvailable,
     spacesLoaded,

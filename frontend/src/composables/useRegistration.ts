@@ -7,14 +7,16 @@ import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
 import { useOnboardingStore } from 'stores/onboarding';
 import { fetchOrgConfig } from 'src/api/config';
-import { setBackendIdentity } from 'src/lib/api/client';
+import { setBackendIdentity, createOrUpdateProfile } from 'src/lib/api/client';
 import { useAppStore } from 'stores/app';
 
 export interface RegistrationData {
   name: string;
+  email?: string;
   bio: string;
   interests: string[];
   customInterests?: string;
+  avatarFileRef?: string;
 }
 
 export function useRegistration() {
@@ -101,9 +103,11 @@ export function useRegistration() {
         admins.map(a => ({ aid: a.aid, oobi: a.oobi })),
         {
           name: profile.name,
+          email: profile.email,
           bio: profile.bio,
           interests: profile.interests,
           customInterests: profile.customInterests,
+          avatarFileRef: profile.avatarFileRef,
           senderOOBI,
         }
       );
@@ -135,7 +139,7 @@ export function useRegistration() {
             aid: currentAID.prefix,
             mnemonic: mnemonicStr,
             orgAid: appStore.orgAid ?? undefined,
-            communitySpaceId: undefined, // assigned after community join
+            communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
           });
           if (identityResult.success) {
             console.log('[Registration] Backend identity set, peer:', identityResult.peerId,
@@ -212,6 +216,55 @@ export function useRegistration() {
   }
 
   /**
+   * Create user profiles after successfully joining the community.
+   * Called by the frontend after HandleJoinCommunity completes.
+   *
+   * @param credentialSAID - The membership credential SAID
+   * @param registrationData - Profile data from registration form
+   * @param avatarFileRef - Optional avatar file ref from upload
+   */
+  async function createProfilesAfterJoin(
+    credentialSAID: string,
+    registrationData?: { name?: string; bio?: string; interests?: string[]; customInterests?: string },
+    avatarFileRef?: string,
+  ): Promise<void> {
+    const currentAID = identityStore.currentAID;
+    if (!currentAID) return;
+
+    // Create PrivateProfile in personal space
+    try {
+      await createOrUpdateProfile('PrivateProfile', {
+        membershipCredentialSAID: credentialSAID,
+        privacySettings: { allowEndorsements: true, allowDirectMessages: true },
+        appPreferences: { mode: 'light', language: 'es' },
+      });
+      console.log('[Registration] PrivateProfile created');
+    } catch (err) {
+      console.warn('[Registration] Failed to create PrivateProfile:', err);
+    }
+
+    // Create SharedProfile in community space
+    try {
+      const now = new Date().toISOString();
+      await createOrUpdateProfile('SharedProfile', {
+        aid: currentAID.prefix,
+        displayName: registrationData?.name || onboardingStore.profile.name || 'Member',
+        bio: registrationData?.bio || onboardingStore.profile.bio || '',
+        avatar: avatarFileRef || '',
+        participationInterests: registrationData?.interests || onboardingStore.profile.participationInterests || [],
+        customInterests: registrationData?.customInterests || onboardingStore.profile.customInterests || '',
+        lastActiveAt: now,
+        createdAt: now,
+        updatedAt: now,
+        typeVersion: 1,
+      });
+      console.log('[Registration] SharedProfile created');
+    } catch (err) {
+      console.warn('[Registration] Failed to create SharedProfile:', err);
+    }
+  }
+
+  /**
    * Reset registration state
    */
   function reset() {
@@ -231,6 +284,7 @@ export function useRegistration() {
     // Actions
     submitRegistration,
     sendMessageToAdmin,
+    createProfilesAfterJoin,
     reset,
   };
 }
