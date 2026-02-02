@@ -39,9 +39,10 @@
 
       <!-- User Profile -->
       <div class="sidebar-footer">
-        <div class="user-profile">
+        <div class="user-profile" @click="showProfileView = true" style="cursor: pointer;">
           <div class="user-avatar">
-            <span>{{ userInitials }}</span>
+            <img v-if="userAvatarUrl" :src="userAvatarUrl" class="w-full h-full rounded-full object-cover" alt="Avatar" />
+            <span v-else>{{ userInitials }}</span>
           </div>
           <div class="user-info">
             <span class="user-name">{{ userName }}</span>
@@ -194,19 +195,13 @@
             <div class="card members-card">
               <h3 class="card-title">New Members</h3>
               <div class="members-list">
-                <button
-                  v-for="(member, index) in newMembers"
+                <ProfileCard
+                  v-for="(member, index) in liveMembers"
                   :key="index"
-                  class="member-item"
-                >
-                  <div class="member-avatar" :class="member.colorClass">
-                    <span>{{ member.initials }}</span>
-                  </div>
-                  <div class="member-info">
-                    <h4>{{ member.name }}</h4>
-                    <p>{{ member.joined }}</p>
-                  </div>
-                </button>
+                  :profile="member.profile"
+                  :communityProfile="member.communityProfile"
+                  @click="handleMemberClick(member)"
+                />
               </div>
             </div>
           </div>
@@ -216,6 +211,23 @@
 
     <!-- Invite Member Modal -->
     <InviteMemberModal v-model="showInviteModal" />
+
+    <!-- My Profile View -->
+    <Teleport to="body">
+      <div v-if="showProfileView" class="profile-overlay" @click.self="showProfileView = false">
+        <MyProfileView @close="showProfileView = false" />
+      </div>
+    </Teleport>
+
+    <!-- Member Profile Dialog -->
+    <Teleport to="body">
+      <MemberProfileDialog
+        v-if="selectedMember"
+        :sharedProfile="selectedMember.shared"
+        :communityProfile="selectedMember.community"
+        @close="selectedMember = null"
+      />
+    </Teleport>
   </div>
 </template>
 
@@ -240,8 +252,14 @@ import { useOnboardingStore } from 'stores/onboarding';
 import { useAdminAccess } from 'src/composables/useAdminAccess';
 import { useRegistrationPolling, type PendingRegistration } from 'src/composables/useRegistrationPolling';
 import { useAdminActions } from 'src/composables/useAdminActions';
+import { useProfilesStore } from 'stores/profiles';
+import { useTypesStore } from 'stores/types';
+import { getFileUrl } from 'src/lib/api/client';
 import AdminSection from 'src/components/admin/AdminSection.vue';
 import InviteMemberModal from 'src/components/dashboard/InviteMemberModal.vue';
+import MyProfileView from 'src/components/profiles/MyProfileView.vue';
+import ProfileCard from 'src/components/profiles/ProfileCard.vue';
+import MemberProfileDialog from 'src/components/profiles/MemberProfileDialog.vue';
 
 const store = useOnboardingStore();
 
@@ -266,9 +284,14 @@ const {
   clearError,
 } = useAdminActions();
 
+const profilesStore = useProfilesStore();
+const typesStore = useTypesStore();
+
 const isRefreshing = ref(false);
 const adminSectionRef = ref<InstanceType<typeof AdminSection> | null>(null);
 const showInviteModal = ref(false);
+const showProfileView = ref(false);
+const selectedMember = ref<{ shared?: Record<string, unknown>; community?: Record<string, unknown> } | null>(null);
 
 // Dark mode state
 const isDark = ref(false);
@@ -313,6 +336,12 @@ function formatDate(dateString: string): string {
 onMounted(async () => {
   isDark.value = document.documentElement.classList.contains('dark');
 
+  // Load type definitions and profiles (including user's own)
+  typesStore.loadDefinitions();
+  profilesStore.loadMyProfiles();
+  profilesStore.loadCommunityProfiles();
+  profilesStore.loadCommunityReadOnlyProfiles();
+
   // Fetch moon phase data
   await fetchMoonPhase();
 
@@ -333,19 +362,30 @@ const toggleDarkMode = () => {
   document.documentElement.classList.toggle('dark', isDark.value);
 };
 
-// User info
+// User info — prefer SharedProfile from community space, fallback to onboarding store
+const mySharedProfile = computed(() => {
+  const sp = profilesStore.getMyProfile('SharedProfile');
+  return sp ? (sp.data as Record<string, unknown>) : null;
+});
+
 const userName = computed(() => {
-  const name = store.profile.name || 'Alex Korero';
-  return name;
+  return (mySharedProfile.value?.displayName as string)
+    || store.profile.name
+    || 'Member';
 });
 
 const userInitials = computed(() => {
-  const name = store.profile.name || 'Alex Korero';
+  const name = userName.value;
   const parts = name.split(' ');
   if (parts.length >= 2) {
     return `${parts[0].charAt(0)}${parts[1].charAt(0)}`.toUpperCase();
   }
   return name.substring(0, 2).toUpperCase();
+});
+
+const userAvatarUrl = computed(() => {
+  const avatar = mySharedProfile.value?.avatar as string;
+  return avatar ? getFileUrl(avatar) : null;
 });
 
 // Stats data - computed to show real pending registration count for admins
@@ -360,13 +400,38 @@ const notificationStats = computed(() => [
   { label: 'Contribution Actions', value: 0, icon: Target },
 ]);
 
-// New members data
-const newMembers = [
-  { name: 'Aroha Tamaki', joined: 'Joined 2 days ago', initials: 'AT', colorClass: 'gradient-1' },
-  { name: 'Kai Whetu', joined: 'Joined 3 days ago', initials: 'KW', colorClass: 'gradient-2' },
-  { name: 'Hine Moana', joined: 'Joined 5 days ago', initials: 'HM', colorClass: 'gradient-3' },
-  { name: 'Tama Rangi', joined: 'Joined 1 week ago', initials: 'TR', colorClass: 'gradient-4' },
-];
+// Live member data from profiles store (with fallback to static data)
+const liveMembers = computed(() => {
+  const shared = profilesStore.communityProfiles;
+  if (shared.length > 0) {
+    return shared.map(p => ({
+      profile: (p.data as Record<string, unknown>) || p,
+      communityProfile: findCommunityProfile(p),
+    }));
+  }
+  // Fallback to static data when no profiles loaded
+  return [
+    { profile: { displayName: 'Aroha Tamaki' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 2 * 86400000).toISOString() } },
+    { profile: { displayName: 'Kai Whetu' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 3 * 86400000).toISOString() } },
+    { profile: { displayName: 'Hine Moana' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 5 * 86400000).toISOString() } },
+    { profile: { displayName: 'Tama Rangi' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 7 * 86400000).toISOString() } },
+  ];
+});
+
+function findCommunityProfile(sharedProfile: Record<string, unknown>): Record<string, unknown> | undefined {
+  const aid = ((sharedProfile.data as Record<string, unknown>)?.aid || sharedProfile.id) as string;
+  if (!aid) return undefined;
+  const cp = profilesStore.communityReadOnlyProfiles.find(p => {
+    const data = (p.data as Record<string, unknown>) || {};
+    return data.userAID === aid ||
+           (p.id as string)?.includes(aid);
+  });
+  return cp ? ((cp.data as Record<string, unknown>) || cp) : undefined;
+}
+
+function handleMemberClick(member: { profile: Record<string, unknown>; communityProfile?: Record<string, unknown> }) {
+  selectedMember.value = { shared: member.profile, community: member.communityProfile };
+}
 
 // Admin action handlers
 async function handleApprove(registration: PendingRegistration) {
@@ -1024,6 +1089,27 @@ async function handleRefresh() {
 @media (max-width: 767px) {
   .sidebar {
     display: none;
+  }
+}
+
+.profile-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+
+  :deep(.my-profile-view) {
+    background: var(--matou-surface, #fff);
+    border-radius: 0.75rem;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
+    width: 90%;
+    max-width: 600px;
   }
 }
 </style>

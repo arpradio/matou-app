@@ -181,7 +181,10 @@ test.describe.serial('Registration Approval Flow', () => {
       console.log('[Test] User received credential!');
 
       // 7. User enters community and lands on dashboard
-      await userPage.getByRole('button', { name: /enter community/i }).click();
+      // Button starts as "Syncing..." (disabled), then becomes "Enter Community" when sync completes
+      // or "Enter Anyway" after 30s timeout. Wait for either enabled state.
+      const enterButton = userPage.getByRole('button', { name: /enter (community|anyway)/i });
+      await enterButton.click({ timeout: TIMEOUT.long + 15_000 });
       await expect(userPage).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.short });
 
       // 8. Verify credential synced to spaces (through user's backend)

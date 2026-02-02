@@ -24,10 +24,48 @@
           <p class="text-white/80 text-base md:text-lg">Welcome to Matou, {{ displayName }}!</p>
         </div>
 
+        <!-- Sync Progress Steps -->
+        <div v-if="!syncReady" class="sync-steps w-full">
+          <div
+            v-for="step in syncSteps"
+            :key="step.key"
+            class="flex items-center gap-3 mb-2"
+          >
+            <CheckCircle2 v-if="step.done" class="w-5 h-5 text-white/90 shrink-0" />
+            <Loader2 v-else-if="step.active" class="w-5 h-5 text-white/80 animate-spin shrink-0" />
+            <Circle v-else class="w-5 h-5 text-white/40 shrink-0" />
+            <span
+              class="text-sm"
+              :class="{
+                'text-white/90 font-medium': step.done || step.active,
+                'text-white/50': !step.done && !step.active,
+              }"
+            >{{ step.label }}</span>
+          </div>
+        </div>
+
+        <!-- Timeout warning -->
+        <p v-if="timedOut && !syncReady" class="text-white/60 text-xs">
+          Sync is taking longer than expected. You can enter anyway.
+        </p>
+
         <!-- Continue Button -->
-        <MBtn class="w-full" @click="handleContinue">
-          Enter Community
-          <ArrowRight class="w-4 h-4 ml-2" />
+        <MBtn
+          class="w-full"
+          :disabled="!syncReady && !timedOut"
+          @click="handleContinue"
+        >
+          <template v-if="syncReady">
+            Enter Community
+            <ArrowRight class="w-4 h-4 ml-2" />
+          </template>
+          <template v-else-if="timedOut">
+            Enter Anyway
+            <ArrowRight class="w-4 h-4 ml-2" />
+          </template>
+          <template v-else>
+            Syncing...
+          </template>
         </MBtn>
       </div>
     </div>
@@ -35,12 +73,13 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
-import { ArrowRight } from 'lucide-vue-next';
+import { ref, computed, watch, onUnmounted } from 'vue';
+import { ArrowRight, CheckCircle2, Loader2, Circle } from 'lucide-vue-next';
 import { useAnimationPresets } from 'composables/useAnimationPresets';
 const { fadeSlideUp } = useAnimationPresets();
 import MBtn from '../base/MBtn.vue';
 import { useIdentityStore } from 'stores/identity';
+import { getSyncStatus } from 'src/lib/api/client';
 
 interface Props {
   show: boolean;
@@ -70,7 +109,89 @@ const emit = defineEmits<{
   (e: 'continue'): void;
 }>();
 
+// Sync state
+const communityReady = ref(false);
+const readOnlyReady = ref(false);
+const syncReady = computed(() => communityReady.value && readOnlyReady.value);
+const timedOut = ref(false);
+let pollTimer: ReturnType<typeof setInterval> | null = null;
+let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
+
+const syncSteps = computed(() => [
+  {
+    key: 'community',
+    label: 'Syncing community data...',
+    done: communityReady.value,
+    active: !communityReady.value && !readOnlyReady.value,
+  },
+  {
+    key: 'readonly',
+    label: 'Loading community info...',
+    done: readOnlyReady.value,
+    active: communityReady.value && !readOnlyReady.value,
+  },
+  {
+    key: 'ready',
+    label: 'Ready!',
+    done: syncReady.value,
+    active: false,
+  },
+]);
+
+async function pollSyncStatus() {
+  try {
+    const status = await getSyncStatus();
+    communityReady.value = status.community.hasObjectTree;
+    readOnlyReady.value = status.readOnly.hasObjectTree;
+    if (status.ready) {
+      stopPolling();
+    }
+  } catch {
+    // Ignore errors, keep polling
+  }
+}
+
+function startSyncPolling() {
+  stopPolling();
+  // Poll immediately, then every 2.5 seconds
+  pollSyncStatus();
+  pollTimer = setInterval(pollSyncStatus, 2500);
+  // Timeout fallback: allow entering after 30 seconds
+  timeoutTimer = setTimeout(() => {
+    timedOut.value = true;
+  }, 30000);
+}
+
+function stopPolling() {
+  if (pollTimer) {
+    clearInterval(pollTimer);
+    pollTimer = null;
+  }
+  if (timeoutTimer) {
+    clearTimeout(timeoutTimer);
+    timeoutTimer = null;
+  }
+}
+
+// Start polling when overlay becomes visible
+watch(() => props.show, (shown) => {
+  if (shown) {
+    // Reset state
+    communityReady.value = false;
+    readOnlyReady.value = false;
+    timedOut.value = false;
+    startSyncPolling();
+  } else {
+    stopPolling();
+  }
+});
+
+onUnmounted(() => {
+  stopPolling();
+});
+
 function handleContinue() {
+  stopPolling();
   emit('continue');
 }
 </script>
@@ -109,6 +230,10 @@ function handleContinue() {
 
 .status-badge {
   white-space: nowrap;
+}
+
+.sync-steps {
+  max-width: 280px;
 }
 
 // Transition

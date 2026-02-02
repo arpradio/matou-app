@@ -15,6 +15,7 @@ import (
 	"github.com/matou-dao/backend/internal/identity"
 	"github.com/matou-dao/backend/internal/keri"
 	bgSync "github.com/matou-dao/backend/internal/sync"
+	matouTypes "github.com/matou-dao/backend/internal/types"
 )
 
 func main() {
@@ -144,11 +145,23 @@ func main() {
 		orgAID = userIdentity.GetOrgAID()
 	}
 
+	// Load additional space IDs from persisted identity
+	communityReadOnlySpaceID := ""
+	adminSpaceID := ""
+	if userIdentity.GetCommunityReadOnlySpaceID() != "" {
+		communityReadOnlySpaceID = userIdentity.GetCommunityReadOnlySpaceID()
+	}
+	if userIdentity.GetAdminSpaceID() != "" {
+		adminSpaceID = userIdentity.GetAdminSpaceID()
+	}
+
 	// Initialize space manager
 	fmt.Println("Initializing space manager...")
 	spaceManager := anysync.NewSpaceManager(anysyncClient, &anysync.SpaceManagerConfig{
-		CommunitySpaceID: communitySpaceID,
-		OrgAID:           orgAID,
+		CommunitySpaceID:         communitySpaceID,
+		CommunityReadOnlySpaceID: communityReadOnlySpaceID,
+		AdminSpaceID:             adminSpaceID,
+		OrgAID:                   orgAID,
 	})
 	spaceStore := anystore.NewSpaceStoreAdapter(store)
 
@@ -177,6 +190,13 @@ func main() {
 	fmt.Printf("   Note: Credential issuance handled by frontend (signify-ts)\n")
 	fmt.Println()
 
+	// Initialize type registry
+	fmt.Println("Initializing type registry...")
+	typeRegistry := matouTypes.NewRegistry()
+	typeRegistry.Bootstrap()
+	fmt.Printf("  Type registry initialized with %d types\n", len(typeRegistry.All()))
+	fmt.Println()
+
 	// Create event broker for SSE
 	eventBroker := api.NewEventBroker()
 
@@ -190,6 +210,8 @@ func main() {
 	invitesHandler := api.NewInvitesHandler(emailSender)
 	identityHandler := api.NewIdentityHandler(userIdentity, sdkClient, spaceManager, spaceStore)
 	eventsHandler := api.NewEventsHandler(eventBroker)
+	profilesHandler := api.NewProfilesHandler(spaceManager, userIdentity, typeRegistry)
+	filesHandler := api.NewFilesHandler(spaceManager.FileManager(), spaceManager)
 
 	// Create HTTP server
 	mux := http.NewServeMux()
@@ -234,6 +256,8 @@ func main() {
 	invitesHandler.RegisterRoutes(mux)
 	identityHandler.RegisterRoutes(mux)
 	eventsHandler.RegisterRoutes(mux)
+	profilesHandler.RegisterRoutes(mux)
+	filesHandler.RegisterRoutes(mux)
 
 	// Start server
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -275,9 +299,23 @@ func main() {
 	fmt.Println("  POST /api/v1/spaces/community/invite         - Generate invite for user")
 	fmt.Println("  POST /api/v1/spaces/community/join           - Join community with invite key")
 	fmt.Println("  GET  /api/v1/spaces/community/verify-access  - Verify community access")
+	fmt.Println("  GET  /api/v1/spaces/sync-status              - Check space sync readiness")
 	fmt.Println()
 	fmt.Println("  Invites:")
 	fmt.Println("  POST /api/v1/invites/send-email       - Email invite code to user")
+	fmt.Println()
+	fmt.Println("  Profiles & Types:")
+	fmt.Println("  GET  /api/v1/types                    - List all type definitions")
+	fmt.Println("  GET  /api/v1/types/{name}             - Get specific type definition")
+	fmt.Println("  POST /api/v1/profiles                 - Create/update a profile object")
+	fmt.Println("  GET  /api/v1/profiles/{type}          - List profiles of a type")
+	fmt.Println("  GET  /api/v1/profiles/{type}/{id}     - Get specific profile")
+	fmt.Println("  GET  /api/v1/profiles/me              - Get current user's profiles")
+	fmt.Println("  POST /api/v1/profiles/init-member     - Initialize member profiles (admin)")
+	fmt.Println()
+	fmt.Println("  Files:")
+	fmt.Println("  POST /api/v1/files/upload             - Upload file (avatar)")
+	fmt.Println("  GET  /api/v1/files/{ref}              - Download file by ref")
 	fmt.Println()
 	fmt.Println("  Events:")
 	fmt.Println("  GET  /api/v1/events                   - SSE event stream")

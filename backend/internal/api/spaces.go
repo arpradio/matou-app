@@ -1,11 +1,11 @@
 package api
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"path/filepath"
 	"time"
 
 	"github.com/anyproto/any-sync/commonspace/object/acl/list"
@@ -13,6 +13,7 @@ import (
 	"github.com/matou-dao/backend/internal/anystore"
 	"github.com/matou-dao/backend/internal/anysync"
 	"github.com/matou-dao/backend/internal/identity"
+	"github.com/matou-dao/backend/internal/types"
 )
 
 // SpacesHandler handles space-related HTTP requests
@@ -35,15 +36,33 @@ func NewSpacesHandler(spaceManager *anysync.SpaceManager, store *anystore.LocalS
 
 // CreateCommunityRequest represents a request to create a community space
 type CreateCommunityRequest struct {
-	OrgAID  string `json:"orgAid"`
-	OrgName string `json:"orgName"`
+	OrgAID         string `json:"orgAid"`
+	OrgName        string `json:"orgName"`
+	AdminAID       string `json:"adminAid,omitempty"`
+	AdminName      string `json:"adminName,omitempty"`
+	AdminEmail     string `json:"adminEmail,omitempty"`
+	AdminAvatar    string `json:"adminAvatar,omitempty"`
+	CredentialSAID string `json:"credentialSaid,omitempty"`
 }
 
 // CreateCommunityResponse represents the response for community space creation
 type CreateCommunityResponse struct {
-	Success bool   `json:"success"`
+	Success          bool            `json:"success"`
+	CommunitySpaceID string          `json:"communitySpaceId,omitempty"`
+	ReadOnlySpaceID  string          `json:"readOnlySpaceId,omitempty"`
+	AdminSpaceID     string          `json:"adminSpaceId,omitempty"`
+	Objects          []CreatedObject `json:"objects,omitempty"`
+	Error            string          `json:"error,omitempty"`
+	// Deprecated: use CommunitySpaceID instead
 	SpaceID string `json:"spaceId,omitempty"`
-	Error   string `json:"error,omitempty"`
+}
+
+// CreatedObject describes an object seeded into a space during creation.
+type CreatedObject struct {
+	SpaceID  string `json:"spaceId"`
+	ObjectID string `json:"objectId"`
+	HeadID   string `json:"headId"`
+	Type     string `json:"type"` // "type_definition" or profile type name
 }
 
 // GetCommunityResponse represents the response for getting community space info
@@ -78,16 +97,20 @@ type InviteRequest struct {
 
 // InviteResponse represents the response for space invitation
 type InviteResponse struct {
-	Success          bool   `json:"success"`
-	CommunitySpaceID string `json:"communitySpaceId,omitempty"`
-	InviteKey        string `json:"inviteKey,omitempty"` // base64-encoded invite private key
-	Error            string `json:"error,omitempty"`
+	Success                bool   `json:"success"`
+	CommunitySpaceID       string `json:"communitySpaceId,omitempty"`
+	InviteKey              string `json:"inviteKey,omitempty"`              // base64-encoded community invite private key
+	ReadOnlyInviteKey      string `json:"readOnlyInviteKey,omitempty"`      // base64-encoded community-readonly invite key
+	ReadOnlySpaceID        string `json:"readOnlySpaceId,omitempty"`        // community-readonly space ID
+	Error                  string `json:"error,omitempty"`
 }
 
 // GetUserSpacesResponse represents the response for getting a user's spaces
 type GetUserSpacesResponse struct {
-	PrivateSpace   *SpaceInfo `json:"privateSpace,omitempty"`
-	CommunitySpace *SpaceInfo `json:"communitySpace,omitempty"`
+	PrivateSpace           *SpaceInfo `json:"privateSpace,omitempty"`
+	CommunitySpace         *SpaceInfo `json:"communitySpace,omitempty"`
+	CommunityReadOnlySpace *SpaceInfo `json:"communityReadOnlySpace,omitempty"`
+	AdminSpace             *SpaceInfo `json:"adminSpace,omitempty"`
 }
 
 // SpaceInfo represents summary info for a single space
@@ -155,6 +178,36 @@ func (h *SpacesHandler) HandleGetUserSpaces(w http.ResponseWriter, r *http.Reque
 		resp.CommunitySpace = info
 	}
 
+	// Look up community read-only space
+	if roSpaceID := h.spaceManager.GetCommunityReadOnlySpaceID(); roSpaceID != "" {
+		info := &SpaceInfo{
+			SpaceID:   roSpaceID,
+			SpaceName: "Community Read-Only",
+		}
+		client := h.spaceManager.GetClient()
+		if client != nil {
+			if _, keyErr := anysync.LoadSpaceKeySet(client.GetDataDir(), roSpaceID); keyErr == nil {
+				info.KeysAvailable = true
+			}
+		}
+		resp.CommunityReadOnlySpace = info
+	}
+
+	// Look up admin space
+	if adminSpaceID := h.spaceManager.GetAdminSpaceID(); adminSpaceID != "" {
+		info := &SpaceInfo{
+			SpaceID:   adminSpaceID,
+			SpaceName: "Admin",
+		}
+		client := h.spaceManager.GetClient()
+		if client != nil {
+			if _, keyErr := anysync.LoadSpaceKeySet(client.GetDataDir(), adminSpaceID); keyErr == nil {
+				info.KeysAvailable = true
+			}
+		}
+		resp.AdminSpace = info
+	}
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -188,11 +241,31 @@ func (h *SpacesHandler) HandleCreateCommunity(w http.ResponseWriter, r *http.Req
 	// Check if community space already exists
 	existingSpace, err := h.spaceManager.GetCommunitySpace(r.Context())
 	if err == nil && existingSpace != nil {
-		writeJSON(w, http.StatusOK, CreateCommunityResponse{
-			Success: true,
-			SpaceID: existingSpace.SpaceID,
-		})
-		return
+		// Verify the space still exists on the network (e.g. after any-sync restart).
+		// MakeSpaceShareable talks to the coordinator — if it fails the space is gone.
+		client := h.spaceManager.GetClient()
+		spaceValid := false
+		if client != nil {
+			if verifyErr := client.MakeSpaceShareable(r.Context(), existingSpace.SpaceID); verifyErr == nil {
+				spaceValid = true
+			} else {
+				fmt.Printf("[CreateCommunity] Cached space %s no longer valid: %v — will recreate\n", existingSpace.SpaceID, verifyErr)
+			}
+		}
+		if spaceValid {
+			writeJSON(w, http.StatusOK, CreateCommunityResponse{
+				Success:          true,
+				CommunitySpaceID: existingSpace.SpaceID,
+				ReadOnlySpaceID:  h.spaceManager.GetCommunityReadOnlySpaceID(),
+				AdminSpaceID:     h.spaceManager.GetAdminSpaceID(),
+				SpaceID:          existingSpace.SpaceID, // backward compat
+			})
+			return
+		}
+		// Clear stale cached IDs so we fall through to recreation
+		h.spaceManager.SetCommunitySpaceID("")
+		h.spaceManager.SetCommunityReadOnlySpaceID("")
+		h.spaceManager.SetAdminSpaceID("")
 	}
 
 	// Create new community space via any-sync client using mnemonic-derived keys.
@@ -231,6 +304,11 @@ func (h *SpacesHandler) HandleCreateCommunity(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Use the peer key as the space signing key so the SDK client's account
+	// identity (peer key) matches the ACL owner. This ensures ACL operations
+	// like BuildInviteAnyone succeed when the admin creates invites later.
+	keys.SigningKey = client.GetSigningKey()
+
 	result, err := client.CreateSpaceWithKeys(ctx, req.OrgAID, anysync.SpaceTypeCommunity, keys)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, CreateCommunityResponse{
@@ -263,10 +341,192 @@ func (h *SpacesHandler) HandleCreateCommunity(w http.ResponseWriter, r *http.Req
 	// Update space manager with the new community space ID
 	h.spaceManager.SetCommunitySpaceID(result.SpaceID)
 
+	// Collect seeded objects across all spaces
+	var allObjects []CreatedObject
+
+	// Seed community space with type definition + admin SharedProfile
+	if req.AdminAID != "" {
+		communityObjects, seedErr := h.seedSpace(ctx, result.SpaceID, types.SharedProfileType(), map[string]interface{}{
+			"aid":         req.AdminAID,
+			"displayName": req.AdminName,
+			"bio":         "",
+			"publicEmail": req.AdminEmail,
+			"avatar":      req.AdminAvatar,
+			"lastActiveAt": time.Now().UTC().Format(time.RFC3339),
+			"createdAt":    time.Now().UTC().Format(time.RFC3339),
+			"updatedAt":    time.Now().UTC().Format(time.RFC3339),
+			"typeVersion":  1,
+		}, fmt.Sprintf("SharedProfile-%s", req.AdminAID))
+		if seedErr != nil {
+			fmt.Printf("Warning: failed to seed community space: %v\n", seedErr)
+		} else {
+			allObjects = append(allObjects, communityObjects...)
+		}
+	}
+
+	// Create community read-only space (key derivation index 2)
+	roKeys, err := anysync.DeriveSpaceKeySet(mnemonic, 2)
+	if err != nil {
+		fmt.Printf("Warning: failed to derive community-readonly space keys: %v\n", err)
+	} else {
+		roKeys.SigningKey = client.GetSigningKey()
+		roResult, err := client.CreateSpaceWithKeys(ctx, req.OrgAID, anysync.SpaceTypeCommunityReadOnly, roKeys)
+		if err != nil {
+			fmt.Printf("Warning: failed to create community-readonly space: %v\n", err)
+		} else {
+			if err := client.MakeSpaceShareable(ctx, roResult.SpaceID); err != nil {
+				fmt.Printf("Warning: failed to make community-readonly space shareable: %v\n", err)
+			}
+			roSpace := &anysync.Space{
+				SpaceID:   roResult.SpaceID,
+				OwnerAID:  req.OrgAID,
+				SpaceType: anysync.SpaceTypeCommunityReadOnly,
+				SpaceName: req.OrgName + " Community (Read-Only)",
+				CreatedAt: roResult.CreatedAt,
+				LastSync:  roResult.CreatedAt,
+			}
+			if err := h.spaceStore.SaveSpace(ctx, roSpace); err != nil {
+				fmt.Printf("Warning: failed to save community-readonly space record: %v\n", err)
+			}
+			h.spaceManager.SetCommunityReadOnlySpaceID(roResult.SpaceID)
+			if h.userIdentity != nil {
+				if err := h.userIdentity.SetCommunityReadOnlySpaceID(roResult.SpaceID); err != nil {
+					fmt.Printf("Warning: failed to persist community-readonly space ID: %v\n", err)
+				}
+			}
+
+			// Seed readonly space with CommunityProfile type def + admin's CommunityProfile
+			if req.AdminAID != "" {
+				now := time.Now().UTC().Format(time.RFC3339)
+				roObjects, seedErr := h.seedSpace(ctx, roResult.SpaceID, types.CommunityProfileType(), map[string]interface{}{
+					"userAID":    req.AdminAID,
+					"credential": req.CredentialSAID,
+					"role":       "Operations Steward",
+					"memberSince": now,
+					"lastActiveAt": now,
+					"credentials":  []string{req.CredentialSAID},
+					"permissions":  []string{"participate", "vote", "propose"},
+				}, fmt.Sprintf("CommunityProfile-%s", req.AdminAID))
+				if seedErr != nil {
+					fmt.Printf("Warning: failed to seed community-readonly space: %v\n", seedErr)
+				} else {
+					allObjects = append(allObjects, roObjects...)
+				}
+
+				// Seed readonly space with OrgProfile type def + Matou OrgProfile
+				orgProfileObjects, orgSeedErr := h.seedSpace(ctx, roResult.SpaceID, types.OrgProfileType(), map[string]interface{}{
+					"communityName": req.OrgName,
+					"contactEmail":  req.AdminEmail,
+					"logo":          req.AdminAvatar,
+					"createdAt":     now,
+				}, fmt.Sprintf("OrgProfile-%s", req.OrgAID))
+				if orgSeedErr != nil {
+					fmt.Printf("Warning: failed to seed OrgProfile: %v\n", orgSeedErr)
+				} else {
+					allObjects = append(allObjects, orgProfileObjects...)
+				}
+			}
+		}
+	}
+
+	// Create admin space (key derivation index 3)
+	adminKeys, err := anysync.DeriveSpaceKeySet(mnemonic, 3)
+	if err != nil {
+		fmt.Printf("Warning: failed to derive admin space keys: %v\n", err)
+	} else {
+		adminKeys.SigningKey = client.GetSigningKey()
+		adminResult, err := client.CreateSpaceWithKeys(ctx, req.OrgAID, anysync.SpaceTypeAdmin, adminKeys)
+		if err != nil {
+			fmt.Printf("Warning: failed to create admin space: %v\n", err)
+		} else {
+			if err := client.MakeSpaceShareable(ctx, adminResult.SpaceID); err != nil {
+				fmt.Printf("Warning: failed to make admin space shareable: %v\n", err)
+			}
+			adminSpace := &anysync.Space{
+				SpaceID:   adminResult.SpaceID,
+				OwnerAID:  req.OrgAID,
+				SpaceType: anysync.SpaceTypeAdmin,
+				SpaceName: req.OrgName + " Admin",
+				CreatedAt: adminResult.CreatedAt,
+				LastSync:  adminResult.CreatedAt,
+			}
+			if err := h.spaceStore.SaveSpace(ctx, adminSpace); err != nil {
+				fmt.Printf("Warning: failed to save admin space record: %v\n", err)
+			}
+			h.spaceManager.SetAdminSpaceID(adminResult.SpaceID)
+			if h.userIdentity != nil {
+				if err := h.userIdentity.SetAdminSpaceID(adminResult.SpaceID); err != nil {
+					fmt.Printf("Warning: failed to persist admin space ID: %v\n", err)
+				}
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, CreateCommunityResponse{
-		Success: true,
-		SpaceID: result.SpaceID,
+		Success:          true,
+		CommunitySpaceID: result.SpaceID,
+		ReadOnlySpaceID:  h.spaceManager.GetCommunityReadOnlySpaceID(),
+		AdminSpaceID:     h.spaceManager.GetAdminSpaceID(),
+		Objects:          allObjects,
+		SpaceID:          result.SpaceID, // backward compat
 	})
+}
+
+// seedSpace writes a type definition and an initial profile object into a space's ObjectTree.
+func (h *SpacesHandler) seedSpace(ctx context.Context, spaceID string, typeDef *types.TypeDefinition, profileData map[string]interface{}, profileObjectID string) ([]CreatedObject, error) {
+	client := h.spaceManager.GetClient()
+	if client == nil {
+		return nil, fmt.Errorf("any-sync client not available")
+	}
+
+	keys, err := anysync.LoadSpaceKeySet(client.GetDataDir(), spaceID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load space keys for %s: %w", spaceID, err)
+	}
+
+	objMgr := h.spaceManager.ObjectTreeManager()
+	var objects []CreatedObject
+
+	// 1. Write type definition
+	typeDefBytes, err := json.Marshal(typeDef)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal type definition: %w", err)
+	}
+	typeDefID := fmt.Sprintf("typedef-%s-%d", typeDef.Name, time.Now().UnixMilli())
+	typePayload := &anysync.ObjectPayload{
+		ID:        typeDefID,
+		Type:      "type_definition",
+		Data:      typeDefBytes,
+		Timestamp: time.Now().Unix(),
+		Version:   1,
+	}
+	headID, err := objMgr.AddObject(ctx, spaceID, typePayload, keys.SigningKey)
+	if err != nil {
+		fmt.Printf("Warning: failed to write type definition %s to space %s: %v\n", typeDef.Name, spaceID, err)
+	} else {
+		objects = append(objects, CreatedObject{SpaceID: spaceID, ObjectID: typeDefID, HeadID: headID, Type: "type_definition"})
+	}
+
+	// 2. Write profile object
+	profileBytes, err := json.Marshal(profileData)
+	if err != nil {
+		return objects, fmt.Errorf("failed to marshal profile data: %w", err)
+	}
+	profilePayload := &anysync.ObjectPayload{
+		ID:        profileObjectID,
+		Type:      typeDef.Name,
+		Data:      profileBytes,
+		Timestamp: time.Now().Unix(),
+		Version:   1,
+	}
+	headID2, err := objMgr.AddObject(ctx, spaceID, profilePayload, keys.SigningKey)
+	if err != nil {
+		fmt.Printf("Warning: failed to write %s to space %s: %v\n", typeDef.Name, spaceID, err)
+	} else {
+		objects = append(objects, CreatedObject{SpaceID: spaceID, ObjectID: profileObjectID, HeadID: headID2, Type: typeDef.Name})
+	}
+
+	return objects, nil
 }
 
 // HandleGetCommunity handles GET /api/v1/spaces/community
@@ -493,6 +753,16 @@ func (h *SpacesHandler) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Ensure the space is shareable on the coordinator (idempotent; needed
+	// after SDK reinit because the new client connection doesn't carry the
+	// previous registration).
+	client := h.spaceManager.GetClient()
+	if client != nil {
+		if err := client.MakeSpaceShareable(ctx, communitySpace.SpaceID); err != nil {
+			fmt.Printf("[Invite] Warning: MakeSpaceShareable: %v\n", err)
+		}
+	}
+
 	// Generate a fresh invite key via the ACL manager
 	aclMgr := h.spaceManager.ACLManager()
 	inviteKey, err := aclMgr.CreateOpenInvite(ctx, communitySpace.SpaceID, list.AclPermissionsWriter)
@@ -514,17 +784,37 @@ func (h *SpacesHandler) HandleInvite(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, InviteResponse{
+	resp := InviteResponse{
 		Success:          true,
 		CommunitySpaceID: communitySpace.SpaceID,
 		InviteKey:        base64.StdEncoding.EncodeToString(inviteKeyBytes),
-	})
+	}
+
+	// Also generate a community-readonly invite key (Reader permissions)
+	roSpaceID := h.spaceManager.GetCommunityReadOnlySpaceID()
+	if roSpaceID != "" {
+		roInviteKey, roErr := aclMgr.CreateOpenInvite(ctx, roSpaceID, list.AclPermissionsReader)
+		if roErr != nil {
+			fmt.Printf("Warning: failed to create community-readonly invite: %v\n", roErr)
+		} else {
+			roKeyBytes, roMarshalErr := roInviteKey.Marshall()
+			if roMarshalErr == nil {
+				resp.ReadOnlyInviteKey = base64.StdEncoding.EncodeToString(roKeyBytes)
+				resp.ReadOnlySpaceID = roSpaceID
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // JoinCommunityRequest represents a request to join the community space
 type JoinCommunityRequest struct {
-	UserAID   string `json:"userAid"`
-	InviteKey string `json:"inviteKey"` // base64-encoded invite private key
+	UserAID            string `json:"userAid"`
+	InviteKey          string `json:"inviteKey"`                    // base64-encoded invite private key
+	SpaceID            string `json:"spaceId,omitempty"`            // community space ID (fallback if not configured locally)
+	ReadOnlyInviteKey  string `json:"readOnlyInviteKey,omitempty"`  // base64-encoded community-readonly invite key
+	ReadOnlySpaceID    string `json:"readOnlySpaceId,omitempty"`    // community-readonly space ID
 }
 
 // JoinCommunityResponse represents the response for community join
@@ -565,6 +855,11 @@ func (h *SpacesHandler) HandleJoinCommunity(w http.ResponseWriter, r *http.Reque
 
 	// Get community space ID
 	communitySpace, err := h.spaceManager.GetCommunitySpace(ctx)
+	if err != nil && req.SpaceID != "" {
+		// Space not configured locally — use the provided ID from the invite
+		h.spaceManager.SetCommunitySpaceID(req.SpaceID)
+		communitySpace, err = h.spaceManager.GetCommunitySpace(ctx)
+	}
 	if err != nil {
 		writeJSON(w, http.StatusConflict, JoinCommunityResponse{
 			Success: false,
@@ -592,7 +887,8 @@ func (h *SpacesHandler) HandleJoinCommunity(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// Load the user's stored peer key (persisted during private space creation)
+	// In per-user mode the SDK client already has the user's peer key
+	// (set via HandleSetIdentity → Reinitialize), so we use it directly.
 	client := h.spaceManager.GetClient()
 	if client == nil {
 		writeJSON(w, http.StatusServiceUnavailable, JoinCommunityResponse{
@@ -602,46 +898,12 @@ func (h *SpacesHandler) HandleJoinCommunity(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	dataDir := client.GetDataDir()
-	_, err = anysync.LoadUserPeerKey(dataDir, req.UserAID)
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, JoinCommunityResponse{
-			Success: false,
-			Error:   "user peer key not found, private space must be created first",
-		})
-		return
+	// Ensure the space is shareable on the coordinator (required before join)
+	if err := client.MakeSpaceShareable(ctx, communitySpace.SpaceID); err != nil {
+		fmt.Printf("[JoinCommunity] Warning: MakeSpaceShareable: %v\n", err)
 	}
 
-	// Create a temporary SDKClient with the user's stored peer key
-	// so JoinWithInvite signs the join record with the USER's identity
-	configPath := filepath.Join(dataDir, "..", "config", "client-host.yml")
-	// Try common config locations
-	for _, candidate := range []string{
-		filepath.Join(dataDir, "..", "config", "client-host.yml"),
-		"config/client-host.yml",
-		"../infrastructure/any-sync/client-host-test.yml",
-	} {
-		if _, statErr := filepath.Abs(candidate); statErr == nil {
-			configPath = candidate
-			break
-		}
-	}
-
-	tempClient, err := anysync.NewSDKClient(configPath, &anysync.ClientOptions{
-		DataDir:     filepath.Join(dataDir, "users", req.UserAID, "join"),
-		PeerKeyPath: filepath.Join(dataDir, "users", req.UserAID, "peer.key"),
-	})
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, JoinCommunityResponse{
-			Success: false,
-			Error:   fmt.Sprintf("failed to create temp client: %v", err),
-		})
-		return
-	}
-	defer tempClient.Close()
-
-	// Wait for space to be available and join
-	aclMgr := anysync.NewMatouACLManager(tempClient, nil)
+	aclMgr := h.spaceManager.ACLManager()
 	metadata := []byte(fmt.Sprintf(`{"aid":"%s","joinedAt":"%s"}`, req.UserAID, time.Now().UTC().Format(time.RFC3339)))
 
 	if err := aclMgr.JoinWithInvite(ctx, communitySpace.SpaceID, invitePrivKey, metadata); err != nil {
@@ -650,6 +912,22 @@ func (h *SpacesHandler) HandleJoinCommunity(w http.ResponseWriter, r *http.Reque
 			Error:   fmt.Sprintf("failed to join community: %v", err),
 		})
 		return
+	}
+
+	// Also join community-readonly space if invite key is provided
+	if req.ReadOnlyInviteKey != "" && req.ReadOnlySpaceID != "" {
+		roKeyBytes, roErr := base64.StdEncoding.DecodeString(req.ReadOnlyInviteKey)
+		if roErr == nil {
+			roPrivKey, roUnmarshalErr := crypto.UnmarshalEd25519PrivateKeyProto(roKeyBytes)
+			if roUnmarshalErr == nil {
+				if joinErr := aclMgr.JoinWithInvite(ctx, req.ReadOnlySpaceID, roPrivKey, metadata); joinErr != nil {
+					fmt.Printf("Warning: failed to join community-readonly space: %v\n", joinErr)
+				} else {
+					h.spaceManager.SetCommunityReadOnlySpaceID(req.ReadOnlySpaceID)
+					fmt.Printf("[Spaces] User %s joined community-readonly space %s\n", req.UserAID, req.ReadOnlySpaceID)
+				}
+			}
+		}
 	}
 
 	writeJSON(w, http.StatusOK, JoinCommunityResponse{
@@ -753,14 +1031,130 @@ func (h *SpacesHandler) handleCommunitySpace(w http.ResponseWriter, r *http.Requ
 	}
 }
 
+// HandleCommunityReadOnlyInvite handles POST /api/v1/spaces/community-readonly/invite
+// Generates a Reader invite key for the community-readonly space.
+func (h *SpacesHandler) HandleCommunityReadOnlyInvite(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, InviteResponse{
+			Success: false,
+			Error:   "method not allowed",
+		})
+		return
+	}
+
+	ctx := r.Context()
+	roSpaceID := h.spaceManager.GetCommunityReadOnlySpaceID()
+	if roSpaceID == "" {
+		writeJSON(w, http.StatusConflict, InviteResponse{
+			Success: false,
+			Error:   "community-readonly space not configured",
+		})
+		return
+	}
+
+	aclMgr := h.spaceManager.ACLManager()
+	inviteKey, err := aclMgr.CreateOpenInvite(ctx, roSpaceID, list.AclPermissionsReader)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, InviteResponse{
+			Success: false,
+			Error:   fmt.Sprintf("failed to create readonly invite: %v", err),
+		})
+		return
+	}
+
+	inviteKeyBytes, err := inviteKey.Marshall()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, InviteResponse{
+			Success: false,
+			Error:   fmt.Sprintf("failed to marshal invite key: %v", err),
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, InviteResponse{
+		Success:         true,
+		ReadOnlySpaceID: roSpaceID,
+		ReadOnlyInviteKey: base64.StdEncoding.EncodeToString(inviteKeyBytes),
+	})
+}
+
+// SyncStatusResponse reports sync readiness for the user's spaces.
+type SyncStatusResponse struct {
+	Community SpaceSyncStatus `json:"community"`
+	ReadOnly  SpaceSyncStatus `json:"readOnly"`
+	Ready     bool            `json:"ready"`
+}
+
+// SpaceSyncStatus describes the sync state of a single space.
+type SpaceSyncStatus struct {
+	SpaceID       string `json:"spaceId,omitempty"`
+	HasObjectTree bool   `json:"hasObjectTree"`
+	ObjectCount   int    `json:"objectCount"`
+	ProfileCount  int    `json:"profileCount"`
+}
+
+// HandleSyncStatus handles GET /api/v1/spaces/sync-status.
+// Returns sync readiness for community and readonly spaces by checking
+// whether ObjectTrees have been synced and how many objects exist.
+func (h *SpacesHandler) HandleSyncStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	ctx := r.Context()
+	objMgr := h.spaceManager.ObjectTreeManager()
+	resp := SyncStatusResponse{}
+
+	// Check community (writable) space
+	communitySpaceID := h.spaceManager.GetCommunitySpaceID()
+	if communitySpaceID != "" {
+		resp.Community.SpaceID = communitySpaceID
+		resp.Community.HasObjectTree = objMgr.HasObjectTree(ctx, communitySpaceID)
+		if resp.Community.HasObjectTree {
+			if objects, err := objMgr.ReadObjects(ctx, communitySpaceID); err == nil {
+				resp.Community.ObjectCount = len(objects)
+				for _, obj := range objects {
+					if obj.Type == "SharedProfile" || obj.Type == "CommunityProfile" {
+						resp.Community.ProfileCount++
+					}
+				}
+			}
+		}
+	}
+
+	// Check community read-only space
+	roSpaceID := h.spaceManager.GetCommunityReadOnlySpaceID()
+	if roSpaceID != "" {
+		resp.ReadOnly.SpaceID = roSpaceID
+		resp.ReadOnly.HasObjectTree = objMgr.HasObjectTree(ctx, roSpaceID)
+		if resp.ReadOnly.HasObjectTree {
+			if objects, err := objMgr.ReadObjects(ctx, roSpaceID); err == nil {
+				resp.ReadOnly.ObjectCount = len(objects)
+				for _, obj := range objects {
+					if obj.Type == "CommunityProfile" || obj.Type == "OrgProfile" {
+						resp.ReadOnly.ProfileCount++
+					}
+				}
+			}
+		}
+	}
+
+	resp.Ready = resp.Community.HasObjectTree && resp.ReadOnly.HasObjectTree
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // RegisterRoutes registers space routes on the mux
 func (h *SpacesHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/spaces/community", h.handleCommunitySpace)
 	mux.HandleFunc("/api/v1/spaces/community/invite", h.HandleInvite)
 	mux.HandleFunc("/api/v1/spaces/community/join", h.HandleJoinCommunity)
 	mux.HandleFunc("/api/v1/spaces/community/verify-access", h.handleVerifyAccess)
+	mux.HandleFunc("/api/v1/spaces/community-readonly/invite", h.HandleCommunityReadOnlyInvite)
 	mux.HandleFunc("/api/v1/spaces/private", h.HandleCreatePrivate)
 	mux.HandleFunc("/api/v1/spaces/user", h.HandleGetUserSpaces)
+	mux.HandleFunc("/api/v1/spaces/sync-status", h.HandleSyncStatus)
 }
 
 // truncateAID returns the first 12 characters of an AID for display purposes

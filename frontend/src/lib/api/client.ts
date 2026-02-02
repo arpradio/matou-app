@@ -120,6 +120,8 @@ export interface SpaceInfo {
 export interface UserSpacesResponse {
   privateSpace?: SpaceInfo;
   communitySpace?: SpaceInfo;
+  communityReadOnlySpace?: SpaceInfo;
+  adminSpace?: SpaceInfo;
 }
 
 /**
@@ -156,12 +158,15 @@ export async function verifyCommunityAccess(aid: string): Promise<VerifyAccessRe
 export interface JoinCommunityRequest {
   userAid: string;
   inviteKey: string;
+  spaceId?: string;
+  readOnlyInviteKey?: string;
+  readOnlySpaceId?: string;
 }
 
 /**
  * Join the community space using an invite key
  */
-export async function joinCommunity(req: JoinCommunityRequest): Promise<{ success: boolean; error?: string }> {
+export async function joinCommunity(req: JoinCommunityRequest): Promise<{ success: boolean; spaceId?: string; error?: string }> {
   try {
     const response = await fetch(`${BACKEND_URL}/api/v1/spaces/community/join`, {
       method: 'POST',
@@ -181,6 +186,7 @@ export interface SetBackendIdentityRequest {
   mnemonic: string;
   orgAid?: string;
   communitySpaceId?: string;
+  credentialSaid?: string;
 }
 
 export interface SetBackendIdentityResponse {
@@ -196,6 +202,8 @@ export interface GetBackendIdentityResponse {
   peerId?: string;
   orgAid?: string;
   communitySpaceId?: string;
+  communityReadOnlySpaceId?: string;
+  adminSpaceId?: string;
   privateSpaceId?: string;
 }
 
@@ -230,6 +238,211 @@ export async function getBackendIdentity(): Promise<GetBackendIdentityResponse> 
     return { configured: false };
   }
 }
+
+// --- Profiles & Types ---
+
+export interface TypeDefinition {
+  name: string;
+  version: number;
+  description: string;
+  space: string;
+  fields: FieldDef[];
+  layouts: Record<string, { fields: string[] }>;
+  permissions: { read: string; write: string };
+}
+
+export interface FieldDef {
+  name: string;
+  type: string;
+  required?: boolean;
+  readOnly?: boolean;
+  default?: unknown;
+  validation?: {
+    minLength?: number;
+    maxLength?: number;
+    min?: number;
+    max?: number;
+    pattern?: string;
+    enum?: string[];
+  };
+  uiHints?: {
+    inputType?: string;
+    displayFormat?: string;
+    placeholder?: string;
+    label?: string;
+    section?: string;
+  };
+}
+
+export interface ObjectPayload {
+  id: string;
+  type: string;
+  ownerKey: string;
+  data: Record<string, unknown>;
+  timestamp: number;
+  version: number;
+}
+
+/**
+ * Get all type definitions from the backend
+ */
+export async function getTypeDefinitions(): Promise<TypeDefinition[]> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/types`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.types ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get a specific type definition by name
+ */
+export async function getTypeDefinition(name: string): Promise<TypeDefinition | null> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/types/${encodeURIComponent(name)}`);
+    if (!response.ok) return null;
+    return response.json();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Create or update a profile object
+ */
+export async function createOrUpdateProfile(
+  typeName: string,
+  data: Record<string, unknown>,
+  options?: { id?: string; spaceId?: string }
+): Promise<{ success: boolean; objectId?: string; error?: string }> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/profiles`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: typeName,
+        id: options?.id,
+        data,
+        spaceId: options?.spaceId,
+      }),
+    });
+    return response.json();
+  } catch {
+    return { success: false, error: 'Network error' };
+  }
+}
+
+/**
+ * Get profiles of a specific type
+ */
+export async function getProfiles(typeName: string): Promise<ObjectPayload[]> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/profiles/${encodeURIComponent(typeName)}`);
+    if (!response.ok) return [];
+    const data = await response.json();
+    return data.profiles ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Get the current user's profiles (all types)
+ */
+export async function getMyProfiles(): Promise<Record<string, ObjectPayload[]>> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/profiles/me`);
+    if (!response.ok) return {};
+    return response.json();
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Initialize member profiles (admin action after credential issuance)
+ */
+export async function initMemberProfiles(data: {
+  memberAid: string;
+  credentialSaid: string;
+  role?: string;
+  displayName?: string;
+  email?: string;
+  avatar?: string;
+  bio?: string;
+  interests?: string[];
+}): Promise<{ success: boolean; objectId?: string; error?: string }> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/profiles/init-member`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    return response.json();
+  } catch {
+    return { success: false, error: 'Network error' };
+  }
+}
+
+/**
+ * Upload a file (avatar) and return a content-addressed fileRef
+ */
+export async function uploadFile(file: File): Promise<{ fileRef?: string; error?: string }> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await fetch(`${BACKEND_URL}/api/v1/files/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+    const result = await response.json();
+    return { fileRef: result.fileRef };
+  } catch {
+    return { error: 'Upload failed' };
+  }
+}
+
+/**
+ * Get the URL for a file by its fileRef
+ */
+export function getFileUrl(fileRef: string): string {
+  return `${BACKEND_URL}/api/v1/files/${fileRef}`;
+}
+
+// --- Sync Status ---
+
+export interface SpaceSyncStatusItem {
+  spaceId?: string;
+  hasObjectTree: boolean;
+  objectCount: number;
+  profileCount: number;
+}
+
+export interface SyncStatusResponse {
+  community: SpaceSyncStatusItem;
+  readOnly: SpaceSyncStatusItem;
+  ready: boolean;
+}
+
+const emptySyncItem: SpaceSyncStatusItem = { hasObjectTree: false, objectCount: 0, profileCount: 0 };
+
+/**
+ * Check sync readiness for community and readonly spaces
+ */
+export async function getSyncStatus(): Promise<SyncStatusResponse> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/v1/spaces/sync-status`);
+    if (!response.ok) return { community: { ...emptySyncItem }, readOnly: { ...emptySyncItem }, ready: false };
+    return response.json();
+  } catch {
+    return { community: { ...emptySyncItem }, readOnly: { ...emptySyncItem }, ready: false };
+  }
+}
+
+// --- Invites ---
 
 export interface SendInviteEmailRequest {
   email: string;
