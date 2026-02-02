@@ -186,6 +186,7 @@ export interface SetBackendIdentityRequest {
   mnemonic: string;
   orgAid?: string;
   communitySpaceId?: string;
+  readOnlySpaceId?: string;
   credentialSaid?: string;
 }
 

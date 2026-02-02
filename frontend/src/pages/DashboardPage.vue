@@ -409,13 +409,7 @@ const liveMembers = computed(() => {
       communityProfile: findCommunityProfile(p),
     }));
   }
-  // Fallback to static data when no profiles loaded
-  return [
-    { profile: { displayName: 'Aroha Tamaki' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 2 * 86400000).toISOString() } },
-    { profile: { displayName: 'Kai Whetu' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 3 * 86400000).toISOString() } },
-    { profile: { displayName: 'Hine Moana' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 5 * 86400000).toISOString() } },
-    { profile: { displayName: 'Tama Rangi' }, communityProfile: { role: 'Member', memberSince: new Date(Date.now() - 7 * 86400000).toISOString() } },
-  ];
+  return [];
 });
 
 function findCommunityProfile(sharedProfile: Record<string, unknown>): Record<string, unknown> | undefined {

@@ -17,6 +17,7 @@ export type OnboardingScreen =
   | 'recovery'
   | 'claim-welcome'
   | 'claim-processing'
+  | 'welcome-overlay'
   | 'main';
 
 /**

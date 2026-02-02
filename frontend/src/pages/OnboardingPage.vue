@@ -39,6 +39,7 @@ import PendingApprovalScreen from 'components/onboarding/PendingApprovalScreen.v
 import RecoveryScreen from 'components/onboarding/RecoveryScreen.vue';
 import ClaimWelcomeScreen from 'components/onboarding/ClaimWelcomeScreen.vue';
 import ClaimProcessingScreen from 'components/onboarding/ClaimProcessingScreen.vue';
+import WelcomeOverlayScreen from 'components/onboarding/WelcomeOverlayScreen.vue';
 
 const router = useRouter();
 const store = useOnboardingStore();
@@ -60,6 +61,7 @@ const screenComponents = {
   'recovery': RecoveryScreen,
   'claim-welcome': ClaimWelcomeScreen,
   'claim-processing': ClaimProcessingScreen,
+  'welcome-overlay': WelcomeOverlayScreen,
 };
 
 const currentComponent = computed(() => {
@@ -139,8 +141,10 @@ const handleContinue = (data?: unknown) => {
       store.navigateTo(next as typeof store.currentScreen);
     }
   } else if (path === 'recover') {
-    // Recovery flow goes directly to main/dashboard on success
+    // Recovery flow goes through welcome overlay for membership checks
     if (current === 'recovery') {
+      store.navigateTo('welcome-overlay');
+    } else if (current === 'welcome-overlay') {
       store.navigateTo('main');
     }
   } else if (path === 'setup') {
@@ -154,14 +158,15 @@ const handleContinue = (data?: unknown) => {
       store.navigateTo(next as typeof store.currentScreen);
     }
   } else if (path === 'claim') {
-    // Claim flow: invite-code → claim-welcome → profile-form → claim-processing → profile-confirmation → mnemonic-verification → main
+    // Claim flow: invite-code → claim-welcome → profile-form → claim-processing → profile-confirmation → mnemonic-verification → welcome-overlay → main
     const forwardMap: Record<string, string> = {
       'invite-code': 'claim-welcome',
       'claim-welcome': 'profile-form',
       'profile-form': 'claim-processing',
       'claim-processing': 'profile-confirmation',
       'profile-confirmation': 'mnemonic-verification',
-      'mnemonic-verification': 'main',
+      'mnemonic-verification': 'welcome-overlay',
+      'welcome-overlay': 'main',
     };
     const next = forwardMap[current];
     if (next) {

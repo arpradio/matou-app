@@ -158,6 +158,7 @@ import {
 } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
 import { useIdentityStore } from 'stores/identity';
+import { useOnboardingStore } from 'stores/onboarding';
 import { KERIClient } from 'src/lib/keri/client';
 
 const identityStore = useIdentityStore();
@@ -251,6 +252,12 @@ async function handleRecover() {
 }
 
 function handleContinue() {
+  // Store mnemonic for backend identity setup (welcome overlay needs it)
+  const mnemonic = words.value.map(w => w.trim().toLowerCase()).join(' ');
+  localStorage.setItem('matou_mnemonic', mnemonic);
+  // Also store in onboarding store for display name
+  const onboardingStore = useOnboardingStore();
+  onboardingStore.updateProfile({ name: recoveredName.value || '' });
   emit('continue');
 }
 

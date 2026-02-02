@@ -41,6 +41,7 @@ type SetIdentityRequest struct {
 	Mnemonic         string `json:"mnemonic"`
 	OrgAID           string `json:"orgAid,omitempty"`
 	CommunitySpaceID string `json:"communitySpaceId,omitempty"`
+	ReadOnlySpaceID  string `json:"readOnlySpaceId,omitempty"`
 	CredentialSAID   string `json:"credentialSaid,omitempty"`
 }
 
@@ -137,6 +138,14 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
+	// 3b. Persist read-only space ID if provided
+	if req.ReadOnlySpaceID != "" {
+		if err := h.userIdentity.SetCommunityReadOnlySpaceID(req.ReadOnlySpaceID); err != nil {
+			fmt.Printf("Warning: failed to persist read-only space ID: %v\n", err)
+		}
+		h.spaceManager.SetCommunityReadOnlySpaceID(req.ReadOnlySpaceID)
+	}
+
 	// 4. Also persist the user's peer key for future join operations
 	peerKey := h.sdkClient.GetSigningKey()
 	if peerKey != nil {
@@ -145,46 +154,72 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// 5. Auto-create the user's private space with mnemonic-derived keys
+	// 5. Recover or create the user's private space with mnemonic-derived keys
 	var privateSpaceID string
 	ctx := r.Context()
+	client := h.sdkClient
 
 	keys, err := anysync.DeriveSpaceKeySet(req.Mnemonic, 0)
 	if err != nil {
-		fmt.Printf("Warning: failed to derive space keys: %v\n", err)
+		fmt.Printf("[Identity] Failed to derive private space keys: %v\n", err)
 	} else {
-		result, err := h.sdkClient.CreateSpaceWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
+		// Derive deterministic space ID from keys
+		derivedID, err := client.DeriveSpaceIDWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
 		if err != nil {
-			fmt.Printf("Warning: failed to create private space: %v (may already exist)\n", err)
-			// Try to find existing space
-			if existing, existErr := h.spaceStore.GetUserSpace(ctx, req.AID); existErr == nil && existing != nil {
-				privateSpaceID = existing.SpaceID
-			}
+			fmt.Printf("[Identity] Failed to derive private space ID: %v\n", err)
 		} else {
-			privateSpaceID = result.SpaceID
-
-			// Save space record to store
-			space := &anysync.Space{
-				SpaceID:   result.SpaceID,
+			// Try to recover existing space from network
+			_, getErr := client.GetSpace(ctx, derivedID)
+			if getErr != nil {
+				// Space doesn't exist on network — create it (first-time setup)
+				fmt.Printf("[Identity] Private space not on network, creating new: %v\n", getErr)
+				_, createErr := client.CreateSpaceWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
+				if createErr != nil {
+					fmt.Printf("[Identity] Failed to create private space: %v\n", createErr)
+				}
+			} else {
+				fmt.Printf("[Identity] Recovered private space from network: %s\n", derivedID)
+			}
+			// Persist keys and space record regardless
+			anysync.PersistSpaceKeySet(client.GetDataDir(), derivedID, keys)
+			h.spaceStore.SaveSpace(ctx, &anysync.Space{
+				SpaceID:   derivedID,
 				OwnerAID:  req.AID,
 				SpaceType: anysync.SpaceTypePrivate,
-				SpaceName: fmt.Sprintf("Private Space - %s", truncateAID(req.AID)),
-				CreatedAt: result.CreatedAt,
-				LastSync:  result.CreatedAt,
-			}
-			if err := h.spaceStore.SaveSpace(ctx, space); err != nil {
-				fmt.Printf("Warning: failed to save private space record: %v\n", err)
-			}
+			})
+			h.userIdentity.SetPrivateSpaceID(derivedID)
+			privateSpaceID = derivedID
 		}
 	}
 
 	if privateSpaceID != "" {
-		if err := h.userIdentity.SetPrivateSpaceID(privateSpaceID); err != nil {
-			fmt.Printf("Warning: failed to persist private space ID: %v\n", err)
-		}
-
 		// Seed private space with PrivateProfile type definition + initial profile
 		h.seedPrivateSpace(ctx, privateSpaceID, req.AID, req.CredentialSAID)
+	}
+
+	// 6. Recover community space (if configured)
+	if req.CommunitySpaceID != "" {
+		if _, err := client.GetSpace(ctx, req.CommunitySpaceID); err != nil {
+			fmt.Printf("[Identity] Failed to sync community space %s: %v\n", req.CommunitySpaceID, err)
+		} else {
+			fmt.Printf("[Identity] Recovered community space: %s\n", req.CommunitySpaceID)
+			// Persist key set for future writes (peer key as signing key)
+			communityKeys, _ := anysync.GenerateSpaceKeySet()
+			communityKeys.SigningKey = client.GetSigningKey()
+			anysync.PersistSpaceKeySet(client.GetDataDir(), req.CommunitySpaceID, communityKeys)
+		}
+	}
+
+	// 7. Recover read-only space (if configured)
+	if req.ReadOnlySpaceID != "" {
+		if _, err := client.GetSpace(ctx, req.ReadOnlySpaceID); err != nil {
+			fmt.Printf("[Identity] Failed to sync readonly space %s: %v\n", req.ReadOnlySpaceID, err)
+		} else {
+			fmt.Printf("[Identity] Recovered readonly space: %s\n", req.ReadOnlySpaceID)
+			roKeys, _ := anysync.GenerateSpaceKeySet()
+			roKeys.SigningKey = client.GetSigningKey()
+			anysync.PersistSpaceKeySet(client.GetDataDir(), req.ReadOnlySpaceID, roKeys)
+		}
 	}
 
 	writeJSON(w, http.StatusOK, SetIdentityResponse{

@@ -335,17 +335,23 @@ export function useCredentialPolling(options: CredentialPollingOptions = {}) {
     console.log('[CredentialPolling] Admitting grant:', grant.a.d);
 
     try {
-      // Get the grant exchange message to find the sender (who we need to send admit to)
+      // Get the grant exchange message to find the sender
       const grantExn = await client.exchanges().get(grant.a.d);
       const grantSender = grantExn.exn.i; // Issuer of the grant message
 
-      // Create admit message using the IpexAdmitArgs interface
-      const [admit, sigs, atc] = await client.ipex().admit({
-        senderName: aidName,
-        recipient: grantSender,
-        message: '',
-        grantSaid: grant.a.d,
-      });
+      // Submit admit with empty embeds. KERIA's sendAdmit() for single-sig
+      // AIDs does not process path labels — the Admitter background task
+      // retrieves ACDC/ISS/ANC data from the GRANT's cloned attachments.
+      const hab = await client.identifiers().get(aidName);
+      const [admit, sigs, atc] = await client.exchanges().createExchangeMessage(
+        hab,
+        '/ipex/admit',
+        { m: '' },
+        {},
+        grantSender,
+        undefined,
+        grant.a.d,
+      );
 
       // Submit the admit
       await client.ipex().submitAdmit(aidName, admit, sigs, atc, [grantSender]);

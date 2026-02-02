@@ -295,6 +295,16 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       // Click "Verify and Continue"
       await inviteePage.getByRole('button', { name: /verify and continue/i }).click();
 
+      // --- Welcome Overlay Screen ---
+      console.log('[Test] Waiting for welcome overlay...');
+      await expect(
+        inviteePage.getByRole('heading', { name: /welcome to matou/i }),
+      ).toBeVisible({ timeout: TIMEOUT.long });
+      console.log('[Test] Welcome overlay shown');
+
+      // Click "Continue to Dashboard"
+      await inviteePage.getByRole('button', { name: /continue to dashboard/i }).click();
+
       // --- Should navigate to dashboard ---
       console.log('[Test] Waiting for dashboard...');
       await expect(inviteePage).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.long });
