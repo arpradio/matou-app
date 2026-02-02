@@ -8,7 +8,8 @@ import { ref } from 'vue';
 import { useKERIClient, KERIClient } from 'src/lib/keri/client';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useAppStore } from 'stores/app';
-import { setBackendIdentity, createOrUpdateProfile, joinCommunity } from 'src/lib/api/client';
+import { setBackendIdentity, createOrUpdateProfile } from 'src/lib/api/client';
+import { useIdentityStore } from 'stores/identity';
 
 export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'securing' | 'done' | 'error';
 
@@ -207,20 +208,23 @@ export function useClaimIdentity() {
         console.warn('[ClaimIdentity] Backend identity configuration deferred:', err);
       }
 
+      // Populate identity store so router guard allows /dashboard access
+      const identityStore = useIdentityStore();
+      identityStore.setCurrentAID({ name: aid.name, prefix: aid.prefix, state: aid.state ?? null });
+
       // Join community + readonly spaces if invite data was embedded in grant
       if (spaceInvite) {
         try {
-          const joinResult = await joinCommunity({
-            userAid: aid.prefix,
+          const joined = await identityStore.joinCommunitySpace({
             inviteKey: spaceInvite.inviteKey,
             spaceId: spaceInvite.spaceId,
             readOnlyInviteKey: spaceInvite.readOnlyInviteKey,
             readOnlySpaceId: spaceInvite.readOnlySpaceId,
           });
-          if (joinResult.success) {
-            console.log('[ClaimIdentity] Joined community space:', joinResult.spaceId);
+          if (joined) {
+            console.log('[ClaimIdentity] Joined community space');
           } else {
-            console.warn('[ClaimIdentity] Community join failed:', joinResult.error);
+            console.warn('[ClaimIdentity] Community join failed');
           }
         } catch (joinErr) {
           console.warn('[ClaimIdentity] Community join deferred:', joinErr);
