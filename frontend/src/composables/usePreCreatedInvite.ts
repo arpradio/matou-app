@@ -8,6 +8,7 @@ import { generateMnemonic } from '@scure/bip39';
 import { wordlist } from '@scure/bip39/wordlists/english.js';
 import { KERIClient, useKERIClient } from 'src/lib/keri/client';
 import { fetchOrgConfig } from 'src/api/config';
+import { BACKEND_URL, initMemberProfiles } from 'src/lib/api/client';
 
 export interface InviteConfig {
   inviteeName: string;
@@ -118,6 +119,45 @@ export function usePreCreatedInvite() {
       await adminClient.resolveOOBI(SCHEMA_OOBI_URL, MEMBERSHIP_SCHEMA_SAID);
       console.log('[PreCreatedInvite] Schema OOBI resolved');
 
+      // Step 5b: Generate space invite keys (mirrors useAdminActions.ts)
+      progress.value = 'Generating community space access...';
+      let grantMessage = '';
+      try {
+        const inviteResponse = await fetch(`${BACKEND_URL}/api/v1/spaces/community/invite`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipientAid: inviteeAid.prefix,
+            credentialSaid: 'pending',
+            schema: 'EMatouMembershipSchemaV1',
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        if (inviteResponse.ok) {
+          const inviteResult = await inviteResponse.json() as {
+            success: boolean;
+            communitySpaceId?: string;
+            inviteKey?: string;
+            readOnlyInviteKey?: string;
+            readOnlySpaceId?: string;
+          };
+          console.log('[PreCreatedInvite] Invite generated:', inviteResult);
+          if (inviteResult.inviteKey) {
+            grantMessage = JSON.stringify({
+              type: 'space_invite',
+              spaceId: inviteResult.communitySpaceId,
+              inviteKey: inviteResult.inviteKey,
+              readOnlyInviteKey: inviteResult.readOnlyInviteKey,
+              readOnlySpaceId: inviteResult.readOnlySpaceId,
+            });
+          }
+        } else {
+          console.warn('[PreCreatedInvite] Space invitation failed:', await inviteResponse.text());
+        }
+      } catch (inviteErr) {
+        console.warn('[PreCreatedInvite] Space invitation deferred:', inviteErr);
+      }
+
       // Step 6: Issue membership credential from admin's agent
       progress.value = 'Issuing membership credential...';
 
@@ -162,14 +202,28 @@ export function usePreCreatedInvite() {
         joinedAt: new Date().toISOString(),
       };
 
-      await adminClient.issueCredential(
+      const credResult = await adminClient.issueCredential(
         orgAidName,
         registryId,
         MEMBERSHIP_SCHEMA_SAID,
         inviteeAid.prefix,
-        credentialData
+        credentialData,
+        grantMessage
       );
       console.log('[PreCreatedInvite] Credential issued and IPEX grant sent');
+
+      // Step 6b: Init member profiles in readonly + community spaces
+      try {
+        await initMemberProfiles({
+          memberAid: inviteeAid.prefix,
+          credentialSaid: credResult.said,
+          role: config.role || 'Member',
+          displayName: config.inviteeName,
+        });
+        console.log('[PreCreatedInvite] Member profiles initialized');
+      } catch (err) {
+        console.warn('[PreCreatedInvite] Profile init deferred:', err);
+      }
 
       // Step 7: Generate invite code (encode mnemonic entropy as base64url)
       // The invite code encodes the mnemonic, NOT the raw passcode.

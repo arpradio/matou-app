@@ -8,7 +8,7 @@ import { ref } from 'vue';
 import { useKERIClient, KERIClient } from 'src/lib/keri/client';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useAppStore } from 'stores/app';
-import { setBackendIdentity, createOrUpdateProfile } from 'src/lib/api/client';
+import { setBackendIdentity, createOrUpdateProfile, joinCommunity } from 'src/lib/api/client';
 
 export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'securing' | 'done' | 'error';
 
@@ -122,10 +122,30 @@ export function useClaimIdentity() {
 
       console.log(`[ClaimIdentity] Found ${grants.length} pending grant(s)`);
 
+      // Capture space invite data from grant messages
+      let spaceInvite: {
+        inviteKey: string;
+        spaceId?: string;
+        readOnlyInviteKey?: string;
+        readOnlySpaceId?: string;
+      } | null = null;
+
       for (const grant of grants) {
         try {
           const grantExn = await client.exchanges().get(grant.a.d);
           const grantSender = grantExn.exn.i;
+
+          // Extract space invite from grant message
+          const msg = grantExn.exn.a?.m || (grant.a as Record<string, unknown>)?.m;
+          if (msg && !spaceInvite) {
+            try {
+              const parsed = JSON.parse(String(msg));
+              if (parsed.type === 'space_invite' && parsed.inviteKey) {
+                spaceInvite = parsed;
+                console.log('[ClaimIdentity] Space invite found in grant message');
+              }
+            } catch { /* not JSON */ }
+          }
 
           const [admit, sigs, atc] = await client.ipex().admit({
             senderName: aid.name,
@@ -185,6 +205,26 @@ export function useClaimIdentity() {
       } catch (err) {
         // Non-fatal - backend identity can be set on session restore
         console.warn('[ClaimIdentity] Backend identity configuration deferred:', err);
+      }
+
+      // Join community + readonly spaces if invite data was embedded in grant
+      if (spaceInvite) {
+        try {
+          const joinResult = await joinCommunity({
+            userAid: aid.prefix,
+            inviteKey: spaceInvite.inviteKey,
+            spaceId: spaceInvite.spaceId,
+            readOnlyInviteKey: spaceInvite.readOnlyInviteKey,
+            readOnlySpaceId: spaceInvite.readOnlySpaceId,
+          });
+          if (joinResult.success) {
+            console.log('[ClaimIdentity] Joined community space:', joinResult.spaceId);
+          } else {
+            console.warn('[ClaimIdentity] Community join failed:', joinResult.error);
+          }
+        } catch (joinErr) {
+          console.warn('[ClaimIdentity] Community join deferred:', joinErr);
+        }
       }
 
       // Populate identity info for the dashboard
