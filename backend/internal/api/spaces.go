@@ -914,6 +914,30 @@ func (h *SpacesHandler) HandleJoinCommunity(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
+	// Generate and persist space keys so this backend can write objects
+	// (e.g. SharedProfile) to the community space. Each member gets their
+	// own signing key; the ACL authorizes writes based on peer identity.
+	dataDir := client.GetDataDir()
+	communityKeys, err := anysync.GenerateSpaceKeySet()
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, JoinCommunityResponse{
+			Success: false,
+			Error:   fmt.Sprintf("failed to generate community space keys: %v", err),
+		})
+		return
+	}
+	// Use the peer key as the signing key so ObjectTree writes are authorized
+	// by the ACL (which registered the peer key during JoinWithInvite).
+	communityKeys.SigningKey = client.GetSigningKey()
+	if err := anysync.PersistSpaceKeySet(dataDir, communitySpace.SpaceID, communityKeys); err != nil {
+		writeJSON(w, http.StatusInternalServerError, JoinCommunityResponse{
+			Success: false,
+			Error:   fmt.Sprintf("failed to persist community space keys: %v", err),
+		})
+		return
+	}
+	fmt.Printf("[JoinCommunity] Generated and persisted space keys for community space %s\n", communitySpace.SpaceID)
+
 	// Also join community-readonly space if invite key is provided
 	if req.ReadOnlyInviteKey != "" && req.ReadOnlySpaceID != "" {
 		roKeyBytes, roErr := base64.StdEncoding.DecodeString(req.ReadOnlyInviteKey)
@@ -925,6 +949,17 @@ func (h *SpacesHandler) HandleJoinCommunity(w http.ResponseWriter, r *http.Reque
 				} else {
 					h.spaceManager.SetCommunityReadOnlySpaceID(req.ReadOnlySpaceID)
 					fmt.Printf("[Spaces] User %s joined community-readonly space %s\n", req.UserAID, req.ReadOnlySpaceID)
+
+					// Persist keys for the readonly space too
+					roKeys, roKeyGenErr := anysync.GenerateSpaceKeySet()
+					if roKeyGenErr == nil {
+						roKeys.SigningKey = client.GetSigningKey()
+						if roPersistErr := anysync.PersistSpaceKeySet(dataDir, req.ReadOnlySpaceID, roKeys); roPersistErr != nil {
+							fmt.Printf("[JoinCommunity] Warning: failed to persist readonly space keys: %v\n", roPersistErr)
+						} else {
+							fmt.Printf("[JoinCommunity] Generated and persisted space keys for readonly space %s\n", req.ReadOnlySpaceID)
+						}
+					}
 				}
 			}
 		}
