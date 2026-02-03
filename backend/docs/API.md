@@ -2,7 +2,7 @@
 
 ## Overview
 
-The MATOU backend provides REST endpoints for credential management, sync operations, trust graph queries, and community data access.
+The MATOU backend provides REST endpoints for identity management, credential management, sync operations, trust graph queries, space management, profiles, file uploads, and real-time events.
 
 - **Base URL**: `http://localhost:8080`
 - **Content-Type**: `application/json`
@@ -59,11 +59,58 @@ System information including organization and any-sync details.
 
 ---
 
-## Sync Endpoints (Week 3)
+## Identity Endpoints
+
+### POST /api/v1/identity/set
+
+Set user identity (AID + mnemonic). Reinitializes the SDK client with the new identity.
+
+**Request**:
+```json
+{
+  "aid": "EUSER123",
+  "mnemonic": "word1 word2 word3 ..."
+}
+```
+
+**Response**:
+```json
+{
+  "success": true,
+  "aid": "EUSER123"
+}
+```
+
+### GET /api/v1/identity
+
+Get current identity status.
+
+**Response**:
+```json
+{
+  "configured": true,
+  "aid": "EUSER123"
+}
+```
+
+### DELETE /api/v1/identity
+
+Clear identity (logout/reset).
+
+**Response**:
+```json
+{
+  "success": true
+}
+```
+
+---
+
+## Sync Endpoints
 
 ### POST /api/v1/sync/credentials
 
-Sync credentials from KERIA (via frontend) to backend storage.
+Sync credentials from KERIA (via frontend) to backend storage. The `userAid` field is optional in per-user mode (falls back to the configured identity).
 
 **Request**:
 ```json
@@ -95,13 +142,14 @@ Sync credentials from KERIA (via frontend) to backend storage.
   "failed": 0,
   "privateSpace": "space-abc123",
   "communitySpace": "space-community",
+  "spaces": ["space-abc123", "space-community"],
   "errors": []
 }
 ```
 
 ### POST /api/v1/sync/kel
 
-Sync Key Event Log (KEL) events from KERIA to backend storage.
+Sync Key Event Log (KEL) events from KERIA to backend storage. The `userAid` field is optional in per-user mode.
 
 **Request**:
 ```json
@@ -114,13 +162,6 @@ Sync Key Event Log (KEL) events from KERIA to backend storage.
       "digest": "EDIGEST001",
       "data": {"keys": ["key1", "key2"]},
       "timestamp": "2026-01-19T00:00:00Z"
-    },
-    {
-      "type": "rot",
-      "sequence": 1,
-      "digest": "EDIGEST002",
-      "data": {"keys": ["key3"]},
-      "timestamp": "2026-01-19T01:00:00Z"
     }
   ]
 }
@@ -142,7 +183,7 @@ Sync Key Event Log (KEL) events from KERIA to backend storage.
 
 ---
 
-## Community Endpoints (Week 3)
+## Community Endpoints
 
 ### GET /api/v1/community/members
 
@@ -194,7 +235,7 @@ List all community-visible credentials (memberships, roles).
 
 ---
 
-## Trust Graph Endpoints (Week 3)
+## Trust Graph Endpoints
 
 ### GET /api/v1/trust/graph
 
@@ -204,8 +245,10 @@ Get the computed trust graph.
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `aid` | string | - | Focus on specific AID (subgraph) |
-| `depth` | int | full | Depth limit for subgraph |
+| `depth` | int | 2 | Depth limit for subgraph (only used with `aid` param) |
 | `summary` | bool | false | Include summary statistics |
+
+When `aid` is omitted, the full graph is returned regardless of `depth`.
 
 **Response**:
 ```json
@@ -218,13 +261,6 @@ Get the computed trust graph.
         "role": "Organization",
         "joinedAt": "2026-01-01T00:00:00Z",
         "credentialCount": 5
-      },
-      "EUSER123": {
-        "aid": "EUSER123",
-        "alias": "alice",
-        "role": "Trusted Member",
-        "joinedAt": "2026-01-19T00:00:00Z",
-        "credentialCount": 2
       }
     },
     "edges": [
@@ -291,12 +327,6 @@ Get the top N trust scores.
       "alias": "alice",
       "role": "Trusted Member",
       "score": 5.0
-    },
-    {
-      "aid": "EUSER456",
-      "alias": "bob",
-      "role": "Member",
-      "score": 3.0
     }
   ],
   "total": 2
@@ -322,78 +352,21 @@ Get trust graph statistics summary.
 
 ---
 
-## Credential Endpoints (Week 2)
+## Credential Endpoints
 
 ### GET /api/v1/credentials
 
 List all cached credentials.
 
-**Response**:
-```json
-{
-  "credentials": [
-    {
-      "said": "ESAID001",
-      "issuer": "EOrg123456789",
-      "recipient": "EUSER123",
-      "schema": "EMatouMembershipSchemaV1",
-      "data": {
-        "communityName": "MATOU",
-        "role": "Member"
-      }
-    }
-  ],
-  "total": 1
-}
-```
-
 ### GET /api/v1/credentials/{said}
 
 Get a specific credential by SAID.
-
-**Response**:
-```json
-{
-  "credential": {
-    "said": "ESAID001",
-    "issuer": "EOrg123456789",
-    "recipient": "EUSER123",
-    "schema": "EMatouMembershipSchemaV1",
-    "data": {
-      "communityName": "MATOU",
-      "role": "Member",
-      "verificationStatus": "community_verified",
-      "permissions": ["read", "comment", "vote"],
-      "joinedAt": "2026-01-19T00:00:00Z"
-    }
-  }
-}
-```
 
 ### POST /api/v1/credentials
 
 Store a credential from the frontend.
 
-**Request**:
-```json
-{
-  "credential": {
-    "said": "ESAID001",
-    "issuer": "EOrg123456789",
-    "recipient": "EUSER123",
-    "schema": "EMatouMembershipSchemaV1",
-    "data": {
-      "communityName": "MATOU",
-      "role": "Member",
-      "verificationStatus": "unverified",
-      "permissions": ["read"],
-      "joinedAt": "2026-01-19T00:00:00Z"
-    }
-  }
-}
-```
-
-**Response**:
+**Response** (uses `StoreResponse` struct):
 ```json
 {
   "success": true,
@@ -404,22 +377,6 @@ Store a credential from the frontend.
 ### POST /api/v1/credentials/validate
 
 Validate a credential structure.
-
-**Request**:
-```json
-{
-  "credential": {
-    "said": "ESAID001",
-    "issuer": "EOrg123456789",
-    "recipient": "EUSER123",
-    "schema": "EMatouMembershipSchemaV1",
-    "data": {
-      "communityName": "MATOU",
-      "role": "Member"
-    }
-  }
-}
-```
 
 **Response**:
 ```json
@@ -438,26 +395,14 @@ List available membership roles.
 ```json
 {
   "roles": [
-    {
-      "name": "Member",
-      "permissions": ["read", "comment"]
-    },
-    {
-      "name": "Verified Member",
-      "permissions": ["read", "comment", "vote"]
-    },
-    {
-      "name": "Trusted Member",
-      "permissions": ["read", "comment", "vote", "propose"]
-    },
-    {
-      "name": "Expert Member",
-      "permissions": ["read", "comment", "vote", "propose", "review"]
-    },
-    {
-      "name": "Operations Steward",
-      "permissions": ["read", "comment", "vote", "propose", "moderate", "admin", "issue_membership", "revoke_membership", "approve_registrations"]
-    }
+    { "name": "Member", "permissions": ["read", "comment"] },
+    { "name": "Verified Member", "permissions": ["read", "comment", "vote"] },
+    { "name": "Trusted Member", "permissions": ["read", "comment", "vote", "propose"] },
+    { "name": "Expert Member", "permissions": ["read", "comment", "vote", "propose", "review"] },
+    { "name": "Contributor", "permissions": ["read", "comment", "vote", "contribute"] },
+    { "name": "Moderator", "permissions": ["read", "comment", "vote", "moderate"] },
+    { "name": "Admin", "permissions": ["read", "comment", "vote", "propose", "moderate", "admin"] },
+    { "name": "Operations Steward", "permissions": ["read", "comment", "vote", "propose", "moderate", "admin", "issue_membership", "revoke_membership", "approve_registrations"] }
   ]
 }
 ```
@@ -479,14 +424,141 @@ Get organization info for the frontend.
 
 ---
 
-## Space Types & Visibility
+## Space Endpoints
 
-| Schema | Space | Description |
-|--------|-------|-------------|
-| `EMatouMembershipSchemaV1` | Community | Public membership credentials |
-| `EOperationsStewardSchemaV1` | Community | Admin/steward role credentials |
-| `ESelfClaimSchemaV1` | Private | User self-assertions (bio, display name) |
-| `EInvitationSchemaV1` | Private | Invitation credentials between users |
+### POST /api/v1/spaces/community
+
+Create a community space.
+
+### GET /api/v1/spaces/community
+
+Get community space info.
+
+### POST /api/v1/spaces/private
+
+Create a private space.
+
+### POST /api/v1/spaces/community/invite
+
+Generate invite for user to join community space.
+
+### POST /api/v1/spaces/community/join
+
+Join community space with invite key.
+
+### GET /api/v1/spaces/community/verify-access
+
+Verify community space access for an AID.
+
+### POST /api/v1/spaces/community-readonly/invite
+
+Generate reader invite for community-readonly space.
+
+### GET /api/v1/spaces/user
+
+Get all spaces for a user (private, community, readonly, admin).
+
+### GET /api/v1/spaces/sync-status
+
+Check space sync readiness.
+
+---
+
+## Profile & Type Endpoints
+
+### GET /api/v1/types
+
+List all type definitions.
+
+### GET /api/v1/types/{name}
+
+Get specific type definition.
+
+### POST /api/v1/profiles
+
+Create/update a profile object.
+
+### GET /api/v1/profiles/{type}
+
+List profiles of a type.
+
+### GET /api/v1/profiles/{type}/{id}
+
+Get a specific profile object.
+
+### GET /api/v1/profiles/me
+
+Get current user's profiles across all spaces.
+
+### POST /api/v1/profiles/init-member
+
+Initialize member profiles (admin operation).
+
+---
+
+## File Endpoints
+
+### POST /api/v1/files/upload
+
+Upload file (multipart, images only, max 5MB).
+
+### GET /api/v1/files/{ref}
+
+Download file by CID ref.
+
+---
+
+## Events Endpoint
+
+### GET /api/v1/events
+
+SSE (Server-Sent Events) stream for real-time updates.
+
+---
+
+## Invites Endpoint
+
+### POST /api/v1/invites/send-email
+
+Email invite code to a user.
+
+---
+
+## Space Types
+
+| Type | Description |
+|------|-------------|
+| `private` | User's private space for self-claims and personal data |
+| `community` | Shared community space for membership credentials |
+| `community-readonly` | Read-only community space for CommunityProfile and OrgProfile |
+| `admin` | Admin space for administrative operations |
+
+---
+
+## Credential Schema
+
+The `Credential` struct includes these fields:
+
+```json
+{
+  "said": "ESAID001",
+  "issuer": "EOrg123456789",
+  "recipient": "EUSER123",
+  "schema": "EMatouMembershipSchemaV1",
+  "data": {
+    "communityName": "MATOU",
+    "role": "Member",
+    "verificationStatus": "community_verified",
+    "permissions": ["read", "comment", "vote"],
+    "joinedAt": "2026-01-19T00:00:00Z",
+    "expiresAt": "2027-01-19T00:00:00Z"
+  },
+  "signature": "...",
+  "timestamp": "2026-01-19T00:00:00Z"
+}
+```
+
+The `signature`, `timestamp`, and `expiresAt` fields are optional.
 
 ---
 
@@ -495,37 +567,41 @@ Get organization info for the frontend.
 The trust score is calculated using weighted factors:
 
 ```
-Score = (IncomingCredentials × 1.0)
-      + (UniqueIssuers × 2.0)
-      + (BidirectionalRelations × 3.0)
-      + (OrgIssuedCredentials × 2.0)
-      - (GraphDepth × 0.1)
+Score = (IncomingCredentials x 1.0)
+      + (UniqueIssuers x 2.0)
+      + (BidirectionalRelations x 3.0)
+      + (OrgIssuedBonus: +2.0 per incoming credential from org AID)
+      - (GraphDepth x 0.1, only when depth > 0)
+
+Minimum score: 0 (cannot be negative)
 ```
 
 **Factors**:
 - **IncomingCredentials**: Number of credentials issued TO this AID
 - **UniqueIssuers**: Number of distinct AIDs that issued credentials
-- **BidirectionalRelations**: Mutual credential relationships (A→B and B→A)
-- **OrgIssuedCredentials**: Bonus for credentials issued by the organization
-- **GraphDepth**: Distance from organization (closer = higher trust)
+- **BidirectionalRelations**: Mutual credential relationships (A->B and B->A)
+- **OrgIssuedBonus**: +2.0 for each incoming credential from the organization AID
+- **GraphDepth**: Distance from organization (closer = higher trust). Only applies when depth > 0.
 
 **Graph Depth**:
 - Depth 0: Organization (root node)
-- Depth 1: Direct members (org → member)
-- Depth 2+: Invited members (member → member chain)
+- Depth 1: Direct members (org -> member)
+- Depth 2+: Invited members (member -> member chain)
 - Depth -1: Unreachable nodes (no path from org)
 
 ---
 
 ## Error Responses
 
-All error responses follow this format:
+Error response format varies by endpoint. Most handlers return:
 
 ```json
 {
   "error": "description of error"
 }
 ```
+
+Some endpoints return typed response structs that include additional fields alongside the error (e.g., `{"success": false, "error": "...", "said": ""}` for credential storage).
 
 **HTTP Status Codes**:
 | Code | Description |
@@ -534,7 +610,9 @@ All error responses follow this format:
 | 400 | Bad Request (invalid input) |
 | 404 | Not Found |
 | 405 | Method Not Allowed |
+| 409 | Conflict (identity not configured, space not available) |
 | 500 | Internal Server Error |
+| 503 | Service Unavailable (any-sync client or filenode not configured) |
 
 ---
 

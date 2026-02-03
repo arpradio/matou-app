@@ -28,7 +28,7 @@ Go backend service for the MATOU DAO MVP, providing integration with KERI (ident
 │  (port 3901)    │                       │  (port 1004)    │
 │                 │                       │                 │
 │  Org AID keys   │                       │  P2P network    │
-│  managed here   │                       │  10 containers  │
+│  managed here   │                       │  14 services    │
 └─────────────────┘                       └─────────────────┘
 ```
 
@@ -45,7 +45,7 @@ Organization AID                    Admin/User AIDs
       │                                    │
 ```
 
-- **Organization AID**: Created via `bootstrap-keria.py`, keys stored in KERIA
+- **Organization AID**: Created via frontend `/setup` flow, keys stored in KERIA
 - **Admin/User AIDs**: Created in frontend via signify-ts, keys stored on device
 - **Credentials**: Org issues steward credentials to admins, admins can then issue memberships
 
@@ -59,28 +59,72 @@ backend/
 ├── internal/
 │   ├── config/
 │   │   ├── config.go               # Configuration management
-│   │   └── config_test.go          # Configuration tests
+│   │   └── config_test.go
 │   ├── anysync/
-│   │   ├── client.go               # any-sync client wrapper
-│   │   └── client_test.go          # any-sync client tests
+│   │   ├── sdk_client.go           # any-sync SDK client wrapper
+│   │   ├── acl.go                  # ACL management (invite/join)
+│   │   ├── credential_tree.go      # Encrypted credential trees
+│   │   ├── object_tree.go          # Object tree management
+│   │   ├── file_manager.go         # File upload/download via filenode
+│   │   ├── file_blockstore.go      # Block-level file storage
+│   │   ├── spaces.go               # Space type management
+│   │   ├── keys.go                 # Key generation and management
+│   │   ├── peer.go                 # Peer key management
+│   │   ├── interface.go            # AnySyncClient interface
+│   │   ├── integration_test.go     # Integration tests
+│   │   ├── testing/                # Test helpers
+│   │   └── testnet/                # Test network management
 │   ├── anystore/
 │   │   ├── client.go               # Local storage layer (anytype-heart based)
-│   │   └── client_test.go          # anystore tests
+│   │   ├── space_adapter.go        # Space storage adapter
+│   │   └── client_test.go
 │   ├── keri/
-│   │   ├── client.go               # KERI client (kli via Docker)
-│   │   └── client_test.go          # KERI client tests
-│   └── api/
-│       ├── credentials.go          # Credential HTTP endpoints
-│       └── credentials_test.go     # Credential API tests
+│   │   ├── client.go               # KERI config & credential validation (no KERIA connection)
+│   │   ├── client_test.go
+│   │   └── testnet/                # KERI test helpers
+│   ├── api/
+│   │   ├── credentials.go          # Credential HTTP endpoints
+│   │   ├── sync.go                 # Sync endpoints (credentials, KEL)
+│   │   ├── trust.go                # Trust graph endpoints
+│   │   ├── health.go               # Health check endpoints
+│   │   ├── identity.go             # User identity management
+│   │   ├── spaces.go               # Space creation, invite, join
+│   │   ├── profiles.go             # Profile CRUD and types
+│   │   ├── files.go                # File upload/download
+│   │   ├── events.go               # SSE event stream
+│   │   ├── invites.go              # Email invitations
+│   │   ├── middleware.go           # CORS, logging middleware
+│   │   └── *_test.go              # Tests for each handler
+│   ├── email/
+│   │   ├── email.go                # Email sending
+│   │   ├── template.go             # Email templates
+│   │   └── integration_test.go
+│   ├── identity/
+│   │   └── identity.go             # User identity management
+│   ├── sync/
+│   │   └── worker.go               # Background sync worker
+│   ├── trust/
+│   │   ├── builder.go              # Trust graph builder
+│   │   ├── score.go                # Trust score calculator
+│   │   └── types.go                # Trust graph types
+│   └── types/
+│       ├── definition.go           # Type definitions
+│       ├── profiles.go             # Profile type system
+│       ├── registry.go             # Type registry
+│       └── validate.go             # Validation
 ├── config/
-│   ├── bootstrap.yaml              # Bootstrap config (gitignored)
+│   ├── bootstrap.yaml              # Bootstrap config (gitignored, created during setup)
+│   ├── bootstrap-test.yaml         # Test mode bootstrap config
+│   ├── client-host.yml             # any-sync client config for host networking
 │   ├── .org-passcode               # Org passcode (gitignored)
 │   └── .keria-config.json          # KERIA config (gitignored)
+├── docs/
+│   └── API.md                      # API reference documentation
 ├── schemas/
 │   ├── matou-membership-schema.json    # Membership ACDC schema
 │   ├── operations-steward-schema.json  # Steward role schema
 │   └── README.md                       # Schema management guide
-├── .env                            # Environment variables (gitignored)
+├── Makefile                        # Build and development targets
 ├── go.mod                          # Go module definition
 └── go.sum                          # Go dependency checksums
 ```
@@ -89,7 +133,7 @@ backend/
 
 ### Prerequisites
 
-- Go 1.21+ installed
+- Go 1.25+ installed
 - Docker and Docker Compose
 - KERI infrastructure running
 - any-sync infrastructure running
@@ -97,22 +141,21 @@ backend/
 ### Setup Infrastructure
 
 ```bash
-# Start KERI (4 containers)
+# Start KERI infrastructure
 cd infrastructure/keri && make up
 
-# Start any-sync (10 containers)
-cd infrastructure/any-sync && make start
-
-# Bootstrap Organization AID
-python3 infrastructure/scripts/bootstrap-keria.py
+# Start any-sync
+cd infrastructure/any-sync && make start-and-wait
 ```
+
+Organization setup is performed via the frontend. See "Organization Setup" section below.
 
 ### Build & Run
 
 ```bash
 cd backend
-go build -o bin/matou-server ./cmd/server
-./bin/matou-server
+go build -o bin/server ./cmd/server
+./bin/server
 ```
 
 ### Test Endpoints
@@ -124,20 +167,23 @@ curl http://localhost:8080/info
 
 ## Environment Variables
 
-Create `.env` file (gitignored):
+The backend reads configuration primarily from the YAML bootstrap file. The following environment variables provide overrides:
 
 ```bash
-# Organization Identity
-MATOU_ORG_AID=<your-org-aid>
-MATOU_ORG_PASSCODE=<your-org-passcode>
+# Runtime Environment
+MATOU_ENV=test                    # Set to "test" for test mode (port 9080, isolated data)
+MATOU_SERVER_PORT=8080            # Override server port
+MATOU_DATA_DIR=./data             # Override data directory
 
-# KERIA Configuration
-KERIA_ADMIN_URL=http://localhost:3901
-KERIA_BOOT_URL=http://localhost:3903
-KERIA_CONTAINER=matou-keria
+# any-sync
+MATOU_ANYSYNC_CONFIG=config/client-host.yml  # Override any-sync config path
 
-# any-sync Configuration
-ANYSYNC_COORDINATOR_URL=http://localhost:1004
+# Email (SMTP)
+MATOU_SMTP_HOST=localhost         # SMTP relay host
+MATOU_SMTP_PORT=2525              # SMTP relay port
+
+# CORS
+MATOU_CORS_MODE=permissive        # CORS mode setting
 ```
 
 ## anystore - Local Storage Layer
@@ -148,18 +194,16 @@ The `anystore` package provides a local storage layer based on anytype-heart's s
 import "github.com/matou-dao/backend/internal/anystore"
 
 // Initialize store
-store, err := anystore.NewLocalStore(&anystore.Config{
-    DataDir: "./data",
-})
+store, err := anystore.NewLocalStore(anystore.DefaultConfig("./data"))
 
 // Store credentials
-err = store.Credentials().Set(ctx, "cred-id", credentialData)
+err = store.StoreCredential(ctx, &anystore.CachedCredential{ID: "cred-id", ...})
 
 // Build trust graph
-err = store.TrustGraph().Set(ctx, "node-id", trustNode)
+err = store.StoreTrustNode(ctx, &anystore.TrustGraphNode{AID: "node-id", ...})
 
 // User preferences
-err = store.Preferences().Set(ctx, "user-id", prefs)
+err = store.SetPreference(ctx, "key", value)
 ```
 
 ### Collections
@@ -171,6 +215,7 @@ err = store.Preferences().Set(ctx, "user-id", prefs)
 | `UserPreferences` | User settings and preferences |
 | `KELCache` | Key Event Logs cache |
 | `SyncIndex` | any-sync synchronization state |
+| `Spaces` | Space registry (maps user AIDs to any-sync space IDs) |
 
 ## Testing
 
@@ -200,7 +245,7 @@ Integration tests run the full SDK client against a real any-sync test network
 cd backend
 
 # Start the test network (if not already running)
-cd ../infrastructure/any-sync-test && make start-and-wait && cd -
+cd ../infrastructure/any-sync && make start-and-wait-test && cd -
 
 # Run integration tests
 KEEP_TEST_NETWORK=1 go test -tags=integration -v -timeout 120s ./internal/anysync/...
@@ -213,12 +258,12 @@ the network automatically.
 #### Managing the test network manually
 
 ```bash
-cd infrastructure/any-sync-test
+cd infrastructure/any-sync
 
-make start-and-wait   # Start and wait for readiness
-make -s is-running    # Check if running
-make down             # Stop
-make clean            # Stop and remove all data
+make start-and-wait-test   # Start and wait for readiness
+make -s is-running-test    # Check if running
+make down-test             # Stop
+make clean-test            # Stop and remove all data
 ```
 
 #### Test network ports
@@ -234,6 +279,8 @@ make clean            # Stop and remove all data
 
 ## API Endpoints
 
+See [docs/API.md](docs/API.md) for the complete API reference.
+
 ### System
 
 - `GET /health` - Health check with org AID
@@ -243,9 +290,13 @@ make clean            # Stop and remove all data
 
 - `GET /api/v1/org` - Get organization info (AID, roles, schema) for frontend
 
-### Credentials
+### Identity
 
-**Note:** Credential issuance is handled by the frontend via signify-ts. The backend stores, retrieves, and validates credentials.
+- `POST /api/v1/identity/set` - Set user identity (AID + mnemonic)
+- `GET /api/v1/identity` - Get current identity status
+- `DELETE /api/v1/identity` - Clear identity (logout/reset)
+
+### Credentials
 
 - `GET /api/v1/credentials` - List stored credentials
 - `POST /api/v1/credentials` - Store a credential from frontend
@@ -253,47 +304,57 @@ make clean            # Stop and remove all data
 - `POST /api/v1/credentials/validate` - Validate credential structure
 - `GET /api/v1/credentials/roles` - List available roles and permissions
 
-#### Get Organization Info
+### Sync
 
-```bash
-curl http://localhost:8080/api/v1/org
-```
+- `POST /api/v1/sync/credentials` - Sync credentials to backend storage
+- `POST /api/v1/sync/kel` - Sync Key Event Log events
 
-#### Store Credential (from frontend)
+### Community
 
-```bash
-curl -X POST http://localhost:8080/api/v1/credentials \
-  -H "Content-Type: application/json" \
-  -d '{
-    "credential": {
-      "said": "ESAID123...",
-      "issuer": "EORG_AID...",
-      "recipient": "EUSER_AID...",
-      "schema": "EMatouMembershipSchemaV1",
-      "data": {
-        "communityName": "MATOU",
-        "role": "Member",
-        "verificationStatus": "unverified",
-        "permissions": ["read", "comment"],
-        "joinedAt": "2026-01-18T00:00:00Z"
-      }
-    }
-  }'
-```
+- `GET /api/v1/community/members` - List community members
+- `GET /api/v1/community/credentials` - List community credentials
 
-#### Validate Credential
+### Trust Graph
 
-```bash
-curl -X POST http://localhost:8080/api/v1/credentials/validate \
-  -H "Content-Type: application/json" \
-  -d '{"credential": {...}}'
-```
+- `GET /api/v1/trust/graph` - Get computed trust graph
+- `GET /api/v1/trust/score/{aid}` - Get trust score for an AID
+- `GET /api/v1/trust/scores` - Get top N trust scores
+- `GET /api/v1/trust/summary` - Trust graph statistics
 
-#### List Roles
+### Spaces
 
-```bash
-curl http://localhost:8080/api/v1/credentials/roles
-```
+- `POST /api/v1/spaces/community` - Create community space
+- `GET /api/v1/spaces/community` - Get community space info
+- `POST /api/v1/spaces/private` - Create private space
+- `POST /api/v1/spaces/community/invite` - Generate invite for community space
+- `POST /api/v1/spaces/community/join` - Join community space with invite key
+- `GET /api/v1/spaces/community/verify-access` - Verify community space access
+- `POST /api/v1/spaces/community-readonly/invite` - Generate reader invite
+- `GET /api/v1/spaces/user` - Get all spaces for current user
+- `GET /api/v1/spaces/sync-status` - Check space sync readiness
+
+### Profiles & Types
+
+- `GET /api/v1/types` - List all type definitions
+- `GET /api/v1/types/{name}` - Get specific type definition
+- `POST /api/v1/profiles` - Create/update a profile object
+- `GET /api/v1/profiles/{type}` - List profiles of a type
+- `GET /api/v1/profiles/{type}/{id}` - Get a specific profile
+- `GET /api/v1/profiles/me` - Get current user's profiles
+- `POST /api/v1/profiles/init-member` - Initialize member profiles (admin)
+
+### Files
+
+- `POST /api/v1/files/upload` - Upload file (images only, max 5MB)
+- `GET /api/v1/files/{ref}` - Download file by CID ref
+
+### Events
+
+- `GET /api/v1/events` - SSE event stream for real-time updates
+
+### Invitations
+
+- `POST /api/v1/invites/send-email` - Email invite code to a user
 
 ## ACDC Schemas
 
@@ -309,13 +370,7 @@ See [schemas/README.md](schemas/README.md) for:
 
 ### Schema Server
 
-The schema server serves schemas at `/oobi/{SAID}` endpoints (required for credential issuance):
-
-```bash
-# Start schema server (required before issuing credentials)
-cd infrastructure/scripts
-python3 schema-server.py --port 7723
-```
+The schema server runs as part of the KERI infrastructure (Docker container on port 7723), serving schemas at `/oobi/{SAID}` endpoints required for credential issuance.
 
 ## Infrastructure Scripts
 
@@ -330,10 +385,11 @@ Located in `infrastructure/keri/scripts/`:
 | Script | Purpose |
 |--------|---------|
 | `config-server.py` | Store and serve org configuration |
+| `health-check.sh` | Health check for KERI infrastructure |
 
 ### Organization Setup
 
-Organization setup is now done via the frontend:
+Organization setup is done via the frontend:
 
 1. Start KERI infrastructure: `cd infrastructure/keri && make up`
 2. Start frontend: `cd frontend && npm run dev`
@@ -352,13 +408,7 @@ cd infrastructure/keri && make up && make health
 ### any-sync Not Running
 
 ```bash
-cd infrastructure/any-sync && make start && ./scripts/health-check.sh
-```
-
-### Missing Bootstrap Config
-
-```bash
-python3 infrastructure/scripts/bootstrap-keria.py
+cd infrastructure/any-sync && make up && make health
 ```
 
 ### Container Crashed
@@ -370,8 +420,6 @@ cd infrastructure/keri && make restart
 
 ## References
 
-- [MVP Implementation Plan](../Keri-AnySync-Research/MVP-IMPLEMENTATION-PLAN-V2.md)
-- [Credential Issuance Guide](../infrastructure/scripts/CREDENTIAL-ISSUANCE-GUIDE.md)
 - [KERI Documentation](https://github.com/weboftrust/keri)
 - [any-sync Documentation](https://github.com/anyproto/any-sync)
 - [anytype-heart](https://github.com/anyproto/anytype-heart)
