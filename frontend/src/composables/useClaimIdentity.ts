@@ -263,31 +263,27 @@ export function useClaimIdentity() {
       step.value = 'securing';
       progress.value = 'Configuring backend identity...';
 
-      try {
-        const onboardingMnemonic = useOnboardingStore().mnemonic.words;
-        if (onboardingMnemonic.length > 0) {
-          const mnemonicStr = onboardingMnemonic.join(' ');
-          await secureStorage.setItem('matou_mnemonic', mnemonicStr);
-
-          const appStore = useAppStore();
-          const identityResult = await setBackendIdentity({
-            aid: aid.prefix,
-            mnemonic: mnemonicStr,
-            orgAid: appStore.orgAid ?? undefined,
-            communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
-            readOnlySpaceId: appStore.orgConfig?.readOnlySpaceId ?? undefined,
-          });
-          if (identityResult.success) {
-            console.log('[ClaimIdentity] Backend identity set, peer:', identityResult.peerId,
-              'private space:', identityResult.privateSpaceId);
-          } else {
-            console.warn('[ClaimIdentity] Backend identity set failed:', identityResult.error);
-          }
-        }
-      } catch (err) {
-        // Non-fatal - backend identity can be set on session restore
-        console.warn('[ClaimIdentity] Backend identity configuration deferred:', err);
+      const onboardingMnemonic = useOnboardingStore().mnemonic.words;
+      if (onboardingMnemonic.length === 0) {
+        throw new Error('No mnemonic available for backend identity setup');
       }
+      const mnemonicStr = onboardingMnemonic.join(' ');
+      await secureStorage.setItem('matou_mnemonic', mnemonicStr);
+
+      const appStore = useAppStore();
+      const identityResult = await setBackendIdentity({
+        aid: aid.prefix,
+        mnemonic: mnemonicStr,
+        orgAid: appStore.orgAid ?? undefined,
+        communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
+        readOnlySpaceId: appStore.orgConfig?.readOnlySpaceId ?? undefined,
+        mode: 'claim',
+      });
+      if (!identityResult.success) {
+        throw new Error(`Backend identity setup failed: ${identityResult.error || 'unknown error'}`);
+      }
+      console.log('[ClaimIdentity] Backend identity set, peer:', identityResult.peerId,
+        'private space:', identityResult.privateSpaceId);
 
       // Populate identity store so router guard allows /dashboard access
       const identityStore = useIdentityStore();

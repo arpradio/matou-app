@@ -189,6 +189,7 @@ export interface SetBackendIdentityRequest {
   readOnlySpaceId?: string;
   adminSpaceId?: string;
   credentialSaid?: string;
+  mode?: string;
 }
 
 export interface SetBackendIdentityResponse {

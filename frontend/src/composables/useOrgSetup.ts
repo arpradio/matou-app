@@ -164,6 +164,7 @@ export function useOrgSetup() {
           mnemonic: mnemonic,
           orgAid: orgAid.prefix,
           credentialSaid: credential.said,
+          mode: 'claim',
         });
         if (identityResult.success) {
           adminPrivateSpaceId = identityResult.privateSpaceId;
@@ -225,6 +226,7 @@ export function useOrgSetup() {
             mnemonic: mnemonic,
             orgAid: orgAid.prefix,
             communitySpaceId,
+            mode: 'claim',
           });
         } else {
           console.warn('[OrgSetup] Failed to create community space:', await spaceResponse.text());

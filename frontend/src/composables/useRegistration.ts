@@ -141,6 +141,7 @@ export function useRegistration() {
             mnemonic: mnemonicStr,
             orgAid: appStore.orgAid ?? undefined,
             communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
+            mode: 'claim',
           });
           if (identityResult.success) {
             console.log('[Registration] Backend identity set, peer:', identityResult.peerId,

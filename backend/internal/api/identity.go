@@ -44,6 +44,7 @@ type SetIdentityRequest struct {
 	ReadOnlySpaceID  string `json:"readOnlySpaceId,omitempty"`
 	AdminSpaceID     string `json:"adminSpaceId,omitempty"`
 	CredentialSAID   string `json:"credentialSaid,omitempty"`
+	Mode             string `json:"mode,omitempty"`
 }
 
 // SetIdentityResponse is the response for POST /api/v1/identity/set.
@@ -170,47 +171,81 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 	var privateSpaceID string
 	ctx := r.Context()
 	client := h.sdkClient
+	isClaim := req.Mode == "claim"
 
 	keys, err := anysync.DeriveSpaceKeySet(req.Mnemonic, 0)
 	if err != nil {
 		fmt.Printf("[Identity] Failed to derive private space keys: %v\n", err)
 	} else {
-		// Derive deterministic space ID from keys
+		// Derive deterministic space ID from keys (used for recovery lookups)
 		derivedID, err := client.DeriveSpaceIDWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
 		if err != nil {
 			fmt.Printf("[Identity] Failed to derive private space ID: %v\n", err)
 		} else {
-			// Try to recover existing space from network
-			_, getErr := client.GetSpace(ctx, derivedID)
-			if getErr != nil {
-				// Space doesn't exist on network — create it (first-time setup)
-				fmt.Printf("[Identity] Private space not on network, creating new: %v\n", getErr)
-				_, createErr := client.CreateSpaceWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
+			// actualID tracks the space ID to use for all downstream operations.
+			// After CreateSpaceWithKeys we use its result (the coordinator-assigned
+			// ID) instead of derivedID, matching the pattern used by community
+			// space creation.
+			actualID := derivedID
+
+			if isClaim {
+				// Claim mode: create directly, treat failure as hard error
+				fmt.Printf("[Identity] Claim mode: creating private space directly\n")
+				result, createErr := client.CreateSpaceWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
 				if createErr != nil {
-					fmt.Printf("[Identity] Failed to create private space: %v\n", createErr)
+					writeJSON(w, http.StatusInternalServerError, SetIdentityResponse{
+						Error: fmt.Sprintf("failed to create private space: %v", createErr),
+					})
+					return
+				}
+				actualID = result.SpaceID
+				if actualID != derivedID {
+					fmt.Printf("[Identity] Warning: derived ID %s != created ID %s, using created ID\n", derivedID, actualID)
 				}
 			} else {
-				fmt.Printf("[Identity] Recovered private space from network: %s\n", derivedID)
+				// Recovery mode: try to recover existing space, fall back to create
+				_, getErr := client.GetSpace(ctx, derivedID)
+				if getErr != nil {
+					fmt.Printf("[Identity] Private space not on network, creating new: %v\n", getErr)
+					result, createErr := client.CreateSpaceWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
+					if createErr != nil {
+						writeJSON(w, http.StatusInternalServerError, SetIdentityResponse{
+							Error: fmt.Sprintf("failed to create private space: %v", createErr),
+						})
+						return
+					}
+					actualID = result.SpaceID
+				} else {
+					fmt.Printf("[Identity] Recovered private space from network: %s\n", derivedID)
+				}
 			}
-			// Persist keys and space record regardless
-			anysync.PersistSpaceKeySet(client.GetDataDir(), derivedID, keys)
+			// Persist keys and space record using the actual space ID
+			anysync.PersistSpaceKeySet(client.GetDataDir(), actualID, keys)
 			h.spaceStore.SaveSpace(ctx, &anysync.Space{
-				SpaceID:   derivedID,
+				SpaceID:   actualID,
 				OwnerAID:  req.AID,
 				SpaceType: anysync.SpaceTypePrivate,
 			})
-			h.userIdentity.SetPrivateSpaceID(derivedID)
-			privateSpaceID = derivedID
+			h.userIdentity.SetPrivateSpaceID(actualID)
+			privateSpaceID = actualID
 		}
 	}
 
 	if privateSpaceID != "" {
 		// Seed private space with PrivateProfile type definition + initial profile
-		h.seedPrivateSpace(ctx, privateSpaceID, req.AID, req.CredentialSAID)
+		if seedErr := h.seedPrivateSpace(ctx, privateSpaceID, req.AID, req.CredentialSAID); seedErr != nil {
+			if isClaim {
+				writeJSON(w, http.StatusInternalServerError, SetIdentityResponse{
+					Error: fmt.Sprintf("failed to seed private space: %v", seedErr),
+				})
+				return
+			}
+			fmt.Printf("[Identity] Warning: failed to seed private space: %v\n", seedErr)
+		}
 	}
 
-	// 6. Recover community space (if configured)
-	if req.CommunitySpaceID != "" {
+	// 6. Recover community space (if configured) — skip in claim mode
+	if req.CommunitySpaceID != "" && !isClaim {
 		if _, err := client.GetSpace(ctx, req.CommunitySpaceID); err != nil {
 			fmt.Printf("[Identity] Failed to sync community space %s: %v\n", req.CommunitySpaceID, err)
 		} else {
@@ -222,8 +257,8 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// 7. Recover read-only space (if configured)
-	if req.ReadOnlySpaceID != "" {
+	// 7. Recover read-only space (if configured) — skip in claim mode
+	if req.ReadOnlySpaceID != "" && !isClaim {
 		if _, err := client.GetSpace(ctx, req.ReadOnlySpaceID); err != nil {
 			fmt.Printf("[Identity] Failed to sync readonly space %s: %v\n", req.ReadOnlySpaceID, err)
 		} else {
@@ -234,8 +269,8 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// 8. Recover admin space (if configured)
-	if adminSpaceID := h.spaceManager.GetAdminSpaceID(); adminSpaceID != "" {
+	// 8. Recover admin space (if configured) — skip in claim mode
+	if adminSpaceID := h.spaceManager.GetAdminSpaceID(); adminSpaceID != "" && !isClaim {
 		if _, err := client.GetSpace(ctx, adminSpaceID); err != nil {
 			fmt.Printf("[Identity] Failed to sync admin space %s: %v\n", adminSpaceID, err)
 		} else {
@@ -254,27 +289,26 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 }
 
 // seedPrivateSpace writes the PrivateProfile type definition and an initial
-// PrivateProfile into the user's private space.
-func (h *IdentityHandler) seedPrivateSpace(ctx context.Context, spaceID, userAID, credentialSAID string) {
+// PrivateProfile into the user's private space. Returns an error if the type
+// definition write fails (the initial profile is best-effort).
+func (h *IdentityHandler) seedPrivateSpace(ctx context.Context, spaceID, userAID, credentialSAID string) error {
 	client := h.sdkClient
 	if client == nil {
-		return
+		return fmt.Errorf("SDK client not available")
 	}
 
 	privateKeys, err := anysync.LoadSpaceKeySet(client.GetDataDir(), spaceID)
 	if err != nil {
-		fmt.Printf("Warning: failed to load private space keys for seeding: %v\n", err)
-		return
+		return fmt.Errorf("loading private space keys: %w", err)
 	}
 
 	objMgr := h.spaceManager.ObjectTreeManager()
 
-	// 1. Write type definition
+	// 1. Write type definition — required for profile writes to succeed
 	typeDef := types.PrivateProfileType()
 	typeDefBytes, err := json.Marshal(typeDef)
 	if err != nil {
-		fmt.Printf("Warning: failed to marshal PrivateProfile type def: %v\n", err)
-		return
+		return fmt.Errorf("marshaling PrivateProfile type def: %w", err)
 	}
 	typeDefID := fmt.Sprintf("typedef-PrivateProfile-%d", time.Now().UnixMilli())
 	typePayload := &anysync.ObjectPayload{
@@ -285,12 +319,12 @@ func (h *IdentityHandler) seedPrivateSpace(ctx context.Context, spaceID, userAID
 		Version:   1,
 	}
 	if _, err := objMgr.AddObject(ctx, spaceID, typePayload, privateKeys.SigningKey); err != nil {
-		fmt.Printf("Warning: failed to seed PrivateProfile type def: %v\n", err)
+		return fmt.Errorf("writing PrivateProfile type def: %w", err)
 	}
 
-	// 2. Write initial PrivateProfile
+	// 2. Write initial PrivateProfile (best-effort — credential SAID may not be available yet)
 	if credentialSAID == "" {
-		return
+		return nil
 	}
 	profileData := map[string]interface{}{
 		"membershipCredentialSAID": credentialSAID,
@@ -299,8 +333,8 @@ func (h *IdentityHandler) seedPrivateSpace(ctx context.Context, spaceID, userAID
 	}
 	profileBytes, err := json.Marshal(profileData)
 	if err != nil {
-		fmt.Printf("Warning: failed to marshal PrivateProfile data: %v\n", err)
-		return
+		fmt.Printf("[Identity] Warning: failed to marshal PrivateProfile data: %v\n", err)
+		return nil
 	}
 	profilePayload := &anysync.ObjectPayload{
 		ID:        fmt.Sprintf("PrivateProfile-%s", userAID),
@@ -310,8 +344,9 @@ func (h *IdentityHandler) seedPrivateSpace(ctx context.Context, spaceID, userAID
 		Version:   1,
 	}
 	if _, err := objMgr.AddObject(ctx, spaceID, profilePayload, privateKeys.SigningKey); err != nil {
-		fmt.Printf("Warning: failed to seed PrivateProfile: %v\n", err)
+		fmt.Printf("[Identity] Warning: failed to seed PrivateProfile: %v\n", err)
 	}
+	return nil
 }
 
 // HandleGetIdentity handles GET /api/v1/identity.
