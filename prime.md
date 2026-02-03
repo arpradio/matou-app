@@ -133,11 +133,11 @@ curl -s http://localhost:9000 > /dev/null && echo "Running" || echo "Not running
 
 ## Environment Matrix
 
-| Environment | Backend Port | any-sync Config | KERIA Ports | Bootstrap File |
-|-------------|--------------|-----------------|-------------|----------------|
-| dev | 8080 | client-dev.yml (1001-1006) | 3901-3904 | bootstrap.yaml |
-| test | 9080 | client-test.yml (2001-2006) | 4901-4904 | bootstrap-test.yaml |
-| production | dynamic | client-production.yml (remote) | remote | bootstrap.yaml |
+| Environment | Backend Port | any-sync Config | KERIA Ports | Org Config |
+|-------------|--------------|-----------------|-------------|------------|
+| dev | 8080 | client-dev.yml (1001-1006) | 3901-3904 | ./data/org-config.yaml |
+| test | 9080 | client-test.yml (2001-2006) | 4901-4904 | ./data-test/org-config.yaml |
+| production | dynamic | client-production.yml (remote) | remote | {dataDir}/org-config.yaml |
 
 ## any-sync Configuration
 
@@ -158,8 +158,9 @@ Example config files are provided with `.example` suffix:
 ```
 frontend/.env.example                        # Dev environment variables
 frontend/.env.production.example             # Production environment variables
-backend/config/bootstrap.yaml.example        # Bootstrap config template
 backend/config/client-production.yml.example # Production any-sync config template
 ```
 
 Copy and customize these for your deployment.
+
+**Note:** Organization config (`org-config.yaml`) is created automatically during frontend setup via `POST /api/v1/org/config`. No manual setup required.

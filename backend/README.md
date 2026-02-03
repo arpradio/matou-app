@@ -114,14 +114,13 @@ backend/
 │       ├── registry.go             # Type registry
 │       └── validate.go             # Validation
 ├── config/
-│   ├── bootstrap.yaml              # Bootstrap config (gitignored, created during setup)
-│   ├── bootstrap.yaml.example      # Bootstrap config template
-│   ├── bootstrap-test.yaml         # Test mode bootstrap config
 │   ├── client-dev.yml              # any-sync client config for dev network (ports 1001-1006)
 │   ├── client-test.yml             # any-sync client config for test network (ports 2001-2006)
 │   ├── client-production.yml.example # Production any-sync config template
 │   ├── .org-passcode               # Org passcode (gitignored)
 │   └── .keria-config.json          # KERIA config (gitignored)
+├── data/                           # Runtime data directory (gitignored)
+│   └── org-config.yaml             # Organization config (created during setup)
 ├── docs/
 │   └── API.md                      # API reference documentation
 ├── schemas/
@@ -144,18 +143,17 @@ backend/
 
 ### 1. Initial Configuration Setup
 
-Copy the example config files:
+The backend requires minimal configuration to start:
 
 ```bash
 cd backend
-
-# Bootstrap config (required - will be populated during org setup)
-cp config/bootstrap.yaml.example config/bootstrap.yaml
 
 # any-sync client configs are already committed for dev/test
 # For production, copy and customize:
 cp config/client-production.yml.example config/client-production.yml
 ```
+
+**Note:** Organization identity (`org-config.yaml`) is created automatically during frontend setup and stored in the data directory. No manual config file setup is needed.
 
 ### 2. Start Infrastructure
 
@@ -205,10 +203,10 @@ make run
 |---------|-------|
 | Port | 8080 |
 | Data directory | `./data` |
+| Org config | `./data/org-config.yaml` |
 | any-sync config | `config/client-dev.yml` |
 | any-sync ports | 1001-1006 |
 | KERIA ports | 3901-3904 |
-| Bootstrap | `config/bootstrap.yaml` |
 
 ### Test Mode
 
@@ -231,10 +229,10 @@ make run-test
 |---------|-------|
 | Port | 9080 |
 | Data directory | `./data-test` |
+| Org config | `./data-test/org-config.yaml` |
 | any-sync config | `config/client-test.yml` |
 | any-sync ports | 2001-2006 |
 | KERIA ports | 4901-4904 |
-| Bootstrap | `config/bootstrap-test.yaml` |
 
 ### Production Mode
 
@@ -252,10 +250,10 @@ MATOU_ENV=production go run ./cmd/server
 |---------|-------|
 | Port | Dynamic (set via `MATOU_SERVER_PORT`) |
 | Data directory | Set via `MATOU_DATA_DIR` |
+| Org config | `{MATOU_DATA_DIR}/org-config.yaml` |
 | any-sync config | `config/client-production.yml` |
 | any-sync ports | Remote (configured in yml) |
 | KERIA ports | Remote |
-| Bootstrap | `config/bootstrap.yaml` |
 
 **Note:** In Electron, production mode is automatically enabled when the app is packaged (`app.isPackaged`). The backend receives `MATOU_ENV=production` from the Electron main process.
 
@@ -296,8 +294,9 @@ The backend connects to the any-sync P2P network using client config files that 
 
 | Example File | Copy To | Purpose |
 |--------------|---------|---------|
-| `bootstrap.yaml.example` | `bootstrap.yaml` | Org identity config (populated during setup) |
 | `client-production.yml.example` | `client-production.yml` | Production any-sync network config |
+
+**Note:** Organization config is stored in `{dataDir}/org-config.yaml` and is created automatically during frontend setup via `POST /api/v1/org/config`.
 
 ### Updating After Infrastructure Changes
 
@@ -517,7 +516,7 @@ Located in `infrastructure/keri/scripts/`:
 
 ### Organization Setup
 
-Organization setup is done via the frontend. This process populates `config/bootstrap.yaml` and the org config stored by the backend.
+Organization setup is done via the frontend. The process creates `{dataDir}/org-config.yaml` which is the single source of truth for organization identity.
 
 **Prerequisites:**
 - Backend running (dev or test mode)
@@ -550,9 +549,9 @@ Organization setup is done via the frontend. This process populates `config/boot
    - Enter admin name
    - The frontend creates: org AID, admin AID, registry, credentials, and community spaces
 
-6. The frontend saves org config to:
-   - Backend: `{dataDir}/org-config.yaml` (via `POST /api/v1/org/config`)
-   - Config server: For backward compatibility (if running)
+6. The frontend saves org config via `POST /api/v1/org/config`, which:
+   - Stores to `{dataDir}/org-config.yaml`
+   - Updates the backend's in-memory configuration
 
 ## Troubleshooting
 

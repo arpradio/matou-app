@@ -36,13 +36,22 @@ func main() {
 	fmt.Println("============================")
 	fmt.Println()
 
-	// Load configuration — test uses a separate bootstrap file
-	fmt.Println("Loading configuration...")
-	bootstrapPath := "config/bootstrap.yaml"
-	if isTest {
-		bootstrapPath = "config/bootstrap-test.yaml"
+	// Initialize data directory first (needed for org config)
+	dataDir := os.Getenv("MATOU_DATA_DIR")
+	if dataDir == "" {
+		if isTest {
+			dataDir = "./data-test"
+		} else {
+			dataDir = "./data"
+		}
 	}
-	cfg, err := config.Load("", bootstrapPath)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Fatalf("Failed to create data directory: %v", err)
+	}
+
+	// Load server configuration (SMTP, KERI URLs, etc.)
+	fmt.Println("Loading configuration...")
+	cfg, err := config.Load("", "")
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
 	}
@@ -59,24 +68,36 @@ func main() {
 		}
 	}
 
-	fmt.Printf("  Configuration loaded\n")
-	fmt.Printf("   Organization: %s\n", cfg.Bootstrap.Organization.Name)
-	fmt.Printf("   Org AID: %s\n", cfg.GetOrgAID())
-	fmt.Printf("   Admin AID: %s\n", cfg.GetAdminAID())
-	fmt.Println()
-
-	// Initialize data directory — test uses ./data-test
-	dataDir := os.Getenv("MATOU_DATA_DIR")
-	if dataDir == "" {
-		if isTest {
-			dataDir = "./data-test"
-		} else {
-			dataDir = "./data"
+	// Initialize org config handler - single source of truth for organization identity
+	// The callback updates the in-memory config when org config is saved via API
+	orgConfigHandler := api.NewOrgConfigHandler(dataDir, func(orgData *api.OrgConfigData) {
+		admins := make([]config.AdminInfo, len(orgData.Admins))
+		for i, a := range orgData.Admins {
+			admins[i] = config.AdminInfo{AID: a.AID, Name: a.Name, OOBI: a.OOBI}
 		}
+		cfg.SetOrgConfig(orgData.Organization.AID, orgData.Organization.Name, admins, orgData.CommunitySpaceID)
+		fmt.Printf("[Config] Updated in-memory config from org-config.yaml\n")
+	})
+
+	// Load org config into main config if available
+	if orgConfigHandler.IsConfigured() {
+		orgData := orgConfigHandler.GetConfig()
+		admins := make([]config.AdminInfo, len(orgData.Admins))
+		for i, a := range orgData.Admins {
+			admins[i] = config.AdminInfo{AID: a.AID, Name: a.Name, OOBI: a.OOBI}
+		}
+		cfg.SetOrgConfig(orgData.Organization.AID, orgData.Organization.Name, admins, orgData.CommunitySpaceID)
 	}
-	if err := os.MkdirAll(dataDir, 0755); err != nil {
-		log.Fatalf("Failed to create data directory: %v", err)
+
+	fmt.Printf("  Configuration loaded\n")
+	if cfg.IsOrgConfigured() {
+		fmt.Printf("   Organization: %s\n", cfg.Bootstrap.Organization.Name)
+		fmt.Printf("   Org AID: %s\n", cfg.GetOrgAID())
+		fmt.Printf("   Admin AID: %s\n", cfg.GetAdminAID())
+	} else {
+		fmt.Println("   Organization: Not configured (run frontend setup)")
 	}
+	fmt.Println()
 
 	// Initialize user identity (per-user mode)
 	fmt.Println("Initializing user identity...")
@@ -167,9 +188,9 @@ func main() {
 	fmt.Printf("   Data directory: %s\n", dataDir)
 	fmt.Println()
 
-	// Determine community space ID: prefer runtime config from identity, fall back to bootstrap
-	communitySpaceID := cfg.GetOrgSpaceID()
-	orgAID := cfg.GetOrgAID()
+	// Determine community space ID: prefer runtime config from identity, fall back to org config
+	communitySpaceID := orgConfigHandler.GetCommunitySpaceID()
+	orgAID := orgConfigHandler.GetOrgAID()
 	if userIdentity.GetCommunitySpaceID() != "" {
 		communitySpaceID = userIdentity.GetCommunitySpaceID()
 	}
@@ -210,15 +231,18 @@ func main() {
 	// Initialize KERI client (config-only, no KERIA connection needed)
 	fmt.Println("Initializing KERI client...")
 	keriClient, err := keri.NewClient(&keri.Config{
-		OrgAID:   cfg.GetOrgAID(),
-		OrgAlias: cfg.Bootstrap.Organization.Alias,
-		OrgName:  cfg.Bootstrap.Organization.Name,
+		OrgAID:   orgConfigHandler.GetOrgAID(),
+		OrgAlias: orgConfigHandler.GetOrgName(), // Use name as alias
+		OrgName:  orgConfigHandler.GetOrgName(),
 	})
 	if err != nil {
 		log.Fatalf("Failed to create KERI client: %v", err)
 	}
 
 	fmt.Printf("  KERI client initialized\n")
+	if !orgConfigHandler.IsConfigured() {
+		fmt.Println("   Note: Organization not configured yet - credential validation disabled")
+	}
 	fmt.Printf("   Note: Credential issuance handled by frontend (signify-ts)\n")
 	fmt.Println()
 
@@ -235,8 +259,8 @@ func main() {
 	// Create API handlers
 	credHandler := api.NewCredentialsHandler(keriClient, store)
 	syncHandler := api.NewSyncHandler(keriClient, store, spaceManager, spaceStore, userIdentity)
-	trustHandler := api.NewTrustHandler(store, cfg.GetOrgAID(), spaceManager)
-	healthHandler := api.NewHealthHandler(store, spaceStore, cfg.GetOrgAID(), cfg.GetAdminAID())
+	trustHandler := api.NewTrustHandler(store, orgConfigHandler.GetOrgAID(), spaceManager)
+	healthHandler := api.NewHealthHandler(store, spaceStore, orgConfigHandler.GetOrgAID(), orgConfigHandler.GetAdminAID())
 	spacesHandler := api.NewSpacesHandler(spaceManager, store, userIdentity)
 	emailSender := email.NewSender(cfg.SMTP)
 	invitesHandler := api.NewInvitesHandler(emailSender)
@@ -244,7 +268,6 @@ func main() {
 	eventsHandler := api.NewEventsHandler(eventBroker)
 	profilesHandler := api.NewProfilesHandler(spaceManager, userIdentity, typeRegistry)
 	filesHandler := api.NewFilesHandler(spaceManager.FileManager(), spaceManager)
-	orgConfigHandler := api.NewOrgConfigHandler(dataDir)
 
 	// Create HTTP server
 	mux := http.NewServeMux()
@@ -260,22 +283,20 @@ func main() {
 			"organization": {
 				"name": "%s",
 				"aid": "%s",
-				"alias": "%s"
+				"configured": %t
 			},
 			"admin": {
-				"aid": "%s",
-				"alias": "%s"
+				"aid": "%s"
 			},
 			"anysync": {
 				"networkId": "%s",
 				"coordinator": "%s"
 			}
 		}`,
-			cfg.Bootstrap.Organization.Name,
-			cfg.GetOrgAID(),
-			cfg.Bootstrap.Organization.Alias,
-			cfg.GetAdminAID(),
-			cfg.Bootstrap.Admin.Alias,
+			orgConfigHandler.GetOrgName(),
+			orgConfigHandler.GetOrgAID(),
+			orgConfigHandler.IsConfigured(),
+			orgConfigHandler.GetAdminAID(),
 			anysyncClient.GetNetworkID(),
 			anysyncClient.GetCoordinatorURL(),
 		)

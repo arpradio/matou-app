@@ -97,7 +97,8 @@ type AccessControlConfig struct {
 	Issuer string `yaml:"issuer"`
 }
 
-// Load reads configuration from files and environment
+// Load reads configuration from files and environment.
+// bootstrapPath is now optional - org config is loaded from dataDir/org-config.yaml.
 func Load(configPath, bootstrapPath string) (*Config, error) {
 	cfg := &Config{
 		// Default values
@@ -131,13 +132,12 @@ func Load(configPath, bootstrapPath string) (*Config, error) {
 		}
 	}
 
-	// Load bootstrap config (required)
-	if bootstrapPath == "" {
-		bootstrapPath = "config/bootstrap.yaml"
-	}
-
-	if err := loadYAML(bootstrapPath, &cfg.Bootstrap); err != nil {
-		return nil, fmt.Errorf("loading bootstrap config: %w", err)
+	// Load bootstrap config if provided (optional, for backward compatibility)
+	if bootstrapPath != "" {
+		if err := loadYAML(bootstrapPath, &cfg.Bootstrap); err != nil {
+			// Bootstrap is now optional - org config comes from org-config.yaml
+			fmt.Printf("No bootstrap config at %s (org config will be loaded from data dir)\n", bootstrapPath)
+		}
 	}
 
 	// Apply SMTP env var overrides
@@ -148,11 +148,6 @@ func Load(configPath, bootstrapPath string) (*Config, error) {
 		if port, err := strconv.Atoi(portStr); err == nil {
 			cfg.SMTP.Port = port
 		}
-	}
-
-	// Validate required fields
-	if err := cfg.Validate(); err != nil {
-		return nil, fmt.Errorf("validating config: %w", err)
 	}
 
 	return cfg, nil
@@ -174,22 +169,31 @@ func loadYAML(path string, target interface{}) error {
 
 // Validate checks that all required configuration is present
 func (c *Config) Validate() error {
-	// Validate organization
-	if c.Bootstrap.Organization.AID == "" {
-		return fmt.Errorf("organization AID is required")
-	}
-	if c.Bootstrap.Organization.Name == "" {
-		return fmt.Errorf("organization name is required")
-	}
-
-	// Admin AID is optional at startup (set later when admin creates identity in frontend)
-
 	// Validate KERI URLs
 	if c.KERI.AdminURL == "" {
 		return fmt.Errorf("KERI admin URL is required")
 	}
 
 	return nil
+}
+
+// IsOrgConfigured returns true if organization identity is configured
+func (c *Config) IsOrgConfigured() bool {
+	return c.Bootstrap.Organization.AID != "" && c.Bootstrap.Organization.Name != ""
+}
+
+// SetOrgConfig updates the bootstrap config with org config data
+func (c *Config) SetOrgConfig(orgAID, orgName string, admins []AdminInfo, communitySpaceID string) {
+	c.Bootstrap.Organization.AID = orgAID
+	c.Bootstrap.Organization.Name = orgName
+	c.Bootstrap.Admins = admins
+	c.Bootstrap.OrgSpace.SpaceID = communitySpaceID
+
+	// Set first admin as primary admin for backward compatibility
+	if len(admins) > 0 {
+		c.Bootstrap.Admin.AID = admins[0].AID
+		c.Bootstrap.Admin.Alias = admins[0].Name
+	}
 }
 
 // GetOrgAID returns the organization AID

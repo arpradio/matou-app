@@ -13,10 +13,12 @@ import (
 
 // OrgConfigHandler handles organization configuration endpoints.
 // This consolidates org config into the backend, replacing the separate config server.
+// It is the single source of truth for organization identity.
 type OrgConfigHandler struct {
 	configPath string
 	mu         sync.RWMutex
 	cache      *OrgConfigData
+	onUpdate   func(*OrgConfigData) // Callback when config is updated
 }
 
 // OrgConfigData represents the organization configuration
@@ -54,10 +56,11 @@ type Registry struct {
 }
 
 // NewOrgConfigHandler creates a new org config handler
-func NewOrgConfigHandler(dataDir string) *OrgConfigHandler {
+func NewOrgConfigHandler(dataDir string, onUpdate func(*OrgConfigData)) *OrgConfigHandler {
 	configPath := filepath.Join(dataDir, "org-config.yaml")
 	h := &OrgConfigHandler{
 		configPath: configPath,
+		onUpdate:   onUpdate,
 	}
 	// Try to load existing config
 	h.loadFromDisk()
@@ -162,6 +165,7 @@ func (h *OrgConfigHandler) HandleSaveConfig(w http.ResponseWriter, r *http.Reque
 	h.mu.Lock()
 	h.cache = &config
 	err := h.saveToDisk()
+	onUpdate := h.onUpdate
 	h.mu.Unlock()
 
 	if err != nil {
@@ -169,6 +173,11 @@ func (h *OrgConfigHandler) HandleSaveConfig(w http.ResponseWriter, r *http.Reque
 			"error": fmt.Sprintf("failed to save config: %v", err),
 		})
 		return
+	}
+
+	// Notify listeners that config was updated
+	if onUpdate != nil {
+		onUpdate(&config)
 	}
 
 	fmt.Printf("[OrgConfig] Saved config for: %s\n", config.Organization.Name)
@@ -216,4 +225,51 @@ func (h *OrgConfigHandler) GetConfig() *OrgConfigData {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return h.cache
+}
+
+// IsConfigured returns true if organization is configured
+func (h *OrgConfigHandler) IsConfigured() bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.cache != nil && h.cache.Organization.AID != ""
+}
+
+// GetOrgAID returns the organization AID, or empty string if not configured
+func (h *OrgConfigHandler) GetOrgAID() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.cache == nil {
+		return ""
+	}
+	return h.cache.Organization.AID
+}
+
+// GetOrgName returns the organization name, or empty string if not configured
+func (h *OrgConfigHandler) GetOrgName() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.cache == nil {
+		return ""
+	}
+	return h.cache.Organization.Name
+}
+
+// GetAdminAID returns the first admin's AID, or empty string if not configured
+func (h *OrgConfigHandler) GetAdminAID() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.cache == nil || len(h.cache.Admins) == 0 {
+		return ""
+	}
+	return h.cache.Admins[0].AID
+}
+
+// GetCommunitySpaceID returns the community space ID, or empty string if not configured
+func (h *OrgConfigHandler) GetCommunitySpaceID() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	if h.cache == nil {
+		return ""
+	}
+	return h.cache.CommunitySpaceID
 }
