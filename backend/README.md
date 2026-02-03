@@ -259,7 +259,7 @@ MATOU_ENV=production go run ./cmd/server
 
 ## Environment Variables
 
-The backend reads configuration primarily from the YAML bootstrap file. The following environment variables provide overrides:
+The backend reads configuration primarily from the org config api. The following environment variables provide overrides:
 
 ```bash
 # Runtime Environment

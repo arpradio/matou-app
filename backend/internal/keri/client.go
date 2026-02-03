@@ -51,14 +51,13 @@ type OrgInfo struct {
 	Schema string   `json:"schema"`
 }
 
-// NewClient creates a new KERI client
+// NewClient creates a new KERI client.
+// OrgAID can be empty if org is not yet configured (will be set later via org config).
 func NewClient(cfg *Config) (*Client, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("config is required")
 	}
-	if cfg.OrgAID == "" {
-		return nil, fmt.Errorf("org AID is required")
-	}
+	// OrgAID is optional - allows server to start before org setup
 	if cfg.OrgAlias == "" {
 		cfg.OrgAlias = "matou-org"
 	}
