@@ -206,18 +206,49 @@ func (h *OrgConfigHandler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/org/health", CORSHandler(h.HandleHealth))
 }
 
-// handleConfig routes to Get (GET) or Save (POST)
+// handleConfig routes to Get (GET), Save (POST), or Delete (DELETE)
 func (h *OrgConfigHandler) handleConfig(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		h.HandleGetConfig(w, r)
 	case http.MethodPost:
 		h.HandleSaveConfig(w, r)
+	case http.MethodDelete:
+		h.HandleDeleteConfig(w, r)
 	default:
 		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
 			"error": "method not allowed",
 		})
 	}
+}
+
+// HandleDeleteConfig handles DELETE /api/v1/org/config
+// Used by tests to clear org config for fresh setup
+func (h *OrgConfigHandler) HandleDeleteConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{
+			"error": "method not allowed",
+		})
+		return
+	}
+
+	h.mu.Lock()
+	h.cache = nil
+	// Remove config file
+	err := os.Remove(h.configPath)
+	h.mu.Unlock()
+
+	if err != nil && !os.IsNotExist(err) {
+		writeJSON(w, http.StatusInternalServerError, map[string]string{
+			"error": fmt.Sprintf("failed to delete config: %v", err),
+		})
+		return
+	}
+
+	fmt.Println("[OrgConfig] Deleted org config")
+	writeJSON(w, http.StatusOK, map[string]string{
+		"status": "deleted",
+	})
 }
 
 // GetConfig returns the current config (for use by other handlers)

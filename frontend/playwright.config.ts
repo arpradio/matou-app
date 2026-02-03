@@ -71,9 +71,18 @@ export default defineConfig({
       use: browserConfig,
     },
     // Default project for running individual test files
+    // Excludes tests that have dedicated projects above
     {
       name: 'chromium',
       use: browserConfig,
+      testIgnore: [
+        /e2e-org-setup\.spec\.ts/,
+        /e2e-registration\.spec\.ts/,
+        /e2e-invitation\.spec\.ts/,
+        /e2e-multi-backend\.spec\.ts/,
+        /e2e-account-recovery\.spec\.ts/,
+        /e2e-recovery-errors\.spec\.ts/,
+      ],
     },
   ],
 

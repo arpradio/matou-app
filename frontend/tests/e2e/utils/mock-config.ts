@@ -5,12 +5,13 @@
  * to all config server requests, making them use a separate test config file.
  */
 import { Page, BrowserContext, APIRequestContext } from '@playwright/test';
-import { keriEndpoints } from './keri-testnet';
+import { keriEndpoints, backendEndpoint } from './keri-testnet';
 
 // The app reads VITE_CONFIG_SERVER_URL from env (.env.test sets it to port 4904).
 // We intercept browser requests to add X-Test-Config header so the config server
 // uses a separate test config file (/data/test-org-config.json).
 const CONFIG_SERVER_URL = keriEndpoints.configURL;
+const BACKEND_URL = backendEndpoint;
 
 /**
  * Setup test config isolation for a page or context
@@ -35,17 +36,27 @@ export async function setupTestConfig(target: Page | BrowserContext) {
 
 /**
  * Clear the test config via API request
+ * Clears both the config server and the backend's org-config.yaml
  *
  * @param request - Playwright APIRequestContext
  */
 export async function clearTestConfig(request: APIRequestContext) {
+  // Clear config server
   try {
     await request.delete(`${CONFIG_SERVER_URL}/api/config`, {
       headers: { 'X-Test-Config': 'true' },
     });
-    console.log('[TestConfig] Cleared test config');
+    console.log('[TestConfig] Cleared config server');
   } catch {
-    console.log('[TestConfig] No test config to clear');
+    console.log('[TestConfig] No config server config to clear');
+  }
+
+  // Clear backend org config
+  try {
+    await request.delete(`${BACKEND_URL}/api/v1/org/config`);
+    console.log('[TestConfig] Cleared backend org config');
+  } catch {
+    console.log('[TestConfig] No backend org config to clear');
   }
 }
 
