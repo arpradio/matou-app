@@ -187,6 +187,7 @@ export interface SetBackendIdentityRequest {
   orgAid?: string;
   communitySpaceId?: string;
   readOnlySpaceId?: string;
+  adminSpaceId?: string;
   credentialSaid?: string;
 }
 

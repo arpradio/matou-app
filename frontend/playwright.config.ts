@@ -58,6 +58,12 @@ export default defineConfig({
       testMatch: /e2e-multi-backend\.spec\.ts/,
       use: browserConfig,
     },
+    // Account recovery - verifies full space access recovery from mnemonic
+    {
+      name: 'account-recovery',
+      testMatch: /e2e-account-recovery\.spec\.ts/,
+      use: browserConfig,
+    },
     // Recovery & error handling - independent
     {
       name: 'recovery-errors',

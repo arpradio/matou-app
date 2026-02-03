@@ -160,6 +160,7 @@ async function runRecoveryChecks() {
       orgAid: appStore.orgAid ?? undefined,
       communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
       readOnlySpaceId: appStore.orgConfig?.readOnlySpaceId ?? undefined,
+      adminSpaceId: appStore.orgConfig?.adminSpaceId ?? undefined,
     });
     if (result.success) {
       backendCheck.status = 'passed';

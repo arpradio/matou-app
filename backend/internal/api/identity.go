@@ -42,6 +42,7 @@ type SetIdentityRequest struct {
 	OrgAID           string `json:"orgAid,omitempty"`
 	CommunitySpaceID string `json:"communitySpaceId,omitempty"`
 	ReadOnlySpaceID  string `json:"readOnlySpaceId,omitempty"`
+	AdminSpaceID     string `json:"adminSpaceId,omitempty"`
 	CredentialSAID   string `json:"credentialSaid,omitempty"`
 }
 
@@ -124,6 +125,9 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		fmt.Printf("Warning: failed to persist peer ID: %v\n", err)
 	}
 
+	fmt.Printf("[Identity] Set identity: aid=%s, orgAid=%s, communitySpace=%s, readOnlySpace=%s, adminSpace=%s\n",
+		req.AID[:min(16, len(req.AID))], req.OrgAID, req.CommunitySpaceID, req.ReadOnlySpaceID, req.AdminSpaceID)
+
 	// 3. Update org config if provided
 	if req.OrgAID != "" || req.CommunitySpaceID != "" {
 		if err := h.userIdentity.SetOrgConfig(req.OrgAID, req.CommunitySpaceID); err != nil {
@@ -144,6 +148,14 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 			fmt.Printf("Warning: failed to persist read-only space ID: %v\n", err)
 		}
 		h.spaceManager.SetCommunityReadOnlySpaceID(req.ReadOnlySpaceID)
+	}
+
+	// 3c. Persist admin space ID if provided
+	if req.AdminSpaceID != "" {
+		if err := h.userIdentity.SetAdminSpaceID(req.AdminSpaceID); err != nil {
+			fmt.Printf("Warning: failed to persist admin space ID: %v\n", err)
+		}
+		h.spaceManager.SetAdminSpaceID(req.AdminSpaceID)
 	}
 
 	// 4. Also persist the user's peer key for future join operations
@@ -219,6 +231,18 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 			roKeys, _ := anysync.GenerateSpaceKeySet()
 			roKeys.SigningKey = client.GetSigningKey()
 			anysync.PersistSpaceKeySet(client.GetDataDir(), req.ReadOnlySpaceID, roKeys)
+		}
+	}
+
+	// 8. Recover admin space (if configured)
+	if adminSpaceID := h.spaceManager.GetAdminSpaceID(); adminSpaceID != "" {
+		if _, err := client.GetSpace(ctx, adminSpaceID); err != nil {
+			fmt.Printf("[Identity] Failed to sync admin space %s: %v\n", adminSpaceID, err)
+		} else {
+			fmt.Printf("[Identity] Recovered admin space: %s\n", adminSpaceID)
+			adminKeys, _ := anysync.GenerateSpaceKeySet()
+			adminKeys.SigningKey = client.GetSigningKey()
+			anysync.PersistSpaceKeySet(client.GetDataDir(), adminSpaceID, adminKeys)
 		}
 	}
 
