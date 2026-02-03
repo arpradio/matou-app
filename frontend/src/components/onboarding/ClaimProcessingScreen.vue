@@ -121,7 +121,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted } from 'vue';
+import { onMounted } from 'vue';
 import {
   ArrowRight,
   CheckCircle2,
@@ -163,7 +163,6 @@ function isStepActive(key: ClaimStep): boolean {
 
 onMounted(async () => {
   const passcode = store.claimPasscode;
-  console.log('[ClaimProcessing] store.claimPasscode length:', passcode?.length);
   if (!passcode) {
     claimStep.value = 'error';
     claimError.value = 'No passcode available. Please use a valid claim link.';

@@ -610,6 +610,21 @@ export class KERIClient {
 
     console.log(`[KERIClient] Created group AID: ${groupAid.prefix}`);
 
+    // Add agent end role so the group AID's OOBI can be served via KERIA.
+    // Without this, oobis().get(name, 'agent') returns nothing, and other
+    // agents can't resolve the org AID's key state for grant verification.
+    const agentId = this.client.agent?.pre;
+    if (agentId) {
+      try {
+        const endRoleResult = await this.client.identifiers().addEndRole(name, 'agent', agentId);
+        const endRoleOp = await endRoleResult.op();
+        await this.client.operations().wait(endRoleOp, { signal: AbortSignal.timeout(30000) });
+        console.log(`[KERIClient] Agent end role added to group AID "${name}"`);
+      } catch (err) {
+        console.warn(`[KERIClient] Failed to add agent end role to group AID:`, err);
+      }
+    }
+
     return {
       prefix: groupAid.prefix,
       name: groupAid.name,
@@ -737,29 +752,29 @@ export class KERIClient {
 
     console.log(`[KERIClient] Admitting credential grant ${grantSaid}...`);
 
-    // Get the grant to find who sent it (so we can send admit back)
-    const notifications = await this.client.notifications().list();
-    const grantNotification = notifications.notes?.find(
-      (n: { a: { d: string } }) => n.a?.d === grantSaid
+    // Get the grant exchange message to find the sender
+    const grantExn = await this.client.exchanges().get(grantSaid);
+    const grantorAid = grantExn.exn.i;
+
+    // Submit admit with empty embeds. KERIA's sendAdmit() for single-sig
+    // AIDs does not process path labels — the Admitter background task
+    // retrieves ACDC/ISS/ANC data from the GRANT's cloned attachments.
+    const hab = await this.client.identifiers().get(aidName);
+    const [admit, asigs, end] = await this.client.exchanges().createExchangeMessage(
+      hab,
+      '/ipex/admit',
+      { m: '' },
+      {},
+      grantorAid,
+      undefined,
+      grantSaid,
     );
-
-    // Find the grantor AID
-    const grantorAid = grantNotification?.a?.i || '';
-
-    // Create the admit message
-    const [admit, asigs, end] = await this.client.ipex().admit({
-      senderName: aidName,
-      recipient: grantorAid,
-      grantSaid: grantSaid,
-      datetime: new Date().toISOString(),
-    });
 
     // Submit the admit
     if (grantorAid) {
       await this.client.ipex().submitAdmit(aidName, admit, asigs, end, [grantorAid]);
       console.log('[KERIClient] Credential admitted successfully');
     } else {
-      // Submit without specific recipient if we can't find the grantor
       await this.client.ipex().submitAdmit(aidName, admit, asigs, end, []);
       console.log('[KERIClient] Credential admitted (no specific recipient)');
     }

@@ -9,6 +9,7 @@ import { useOnboardingStore } from 'stores/onboarding';
 import { fetchOrgConfig } from 'src/api/config';
 import { setBackendIdentity, createOrUpdateProfile } from 'src/lib/api/client';
 import { useAppStore } from 'stores/app';
+import { secureStorage } from 'src/lib/secureStorage';
 
 export interface RegistrationData {
   name: string;
@@ -132,7 +133,7 @@ export function useRegistration() {
         const mnemonicWords = onboardingStore.mnemonic.words;
         if (mnemonicWords.length > 0) {
           const mnemonicStr = mnemonicWords.join(' ');
-          localStorage.setItem('matou_mnemonic', mnemonicStr);
+          await secureStorage.setItem('matou_mnemonic', mnemonicStr);
 
           const appStore = useAppStore();
           const identityResult = await setBackendIdentity({
@@ -140,6 +141,7 @@ export function useRegistration() {
             mnemonic: mnemonicStr,
             orgAid: appStore.orgAid ?? undefined,
             communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
+            mode: 'claim',
           });
           if (identityResult.success) {
             console.log('[Registration] Backend identity set, peer:', identityResult.peerId,

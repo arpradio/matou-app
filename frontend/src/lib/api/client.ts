@@ -186,7 +186,10 @@ export interface SetBackendIdentityRequest {
   mnemonic: string;
   orgAid?: string;
   communitySpaceId?: string;
+  readOnlySpaceId?: string;
+  adminSpaceId?: string;
   credentialSaid?: string;
+  mode?: string;
 }
 
 export interface SetBackendIdentityResponse {

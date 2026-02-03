@@ -93,6 +93,8 @@ export function setupPageLogging(page: Page, prefix: string): void {
       text.includes('Credential') || text.includes('IPEX') ||
       text.includes('KERIClient') || text.includes('Polling') ||
       text.includes('OrgSetup') || text.includes('Config') ||
+      text.includes('ClaimIdentity') || text.includes('WelcomeOverlay') ||
+      text.includes('IdentityStore') ||
       text.includes('Error') || msg.type() === 'error'
     ) {
       console.log(`[${prefix}] ${text}`);
@@ -284,10 +286,9 @@ export async function registerUser(
 
 /**
  * Log in as an existing user by recovering identity from mnemonic.
- * After KERI identity recovery, ensures the any-sync peer key is stored
- * by calling the private space API (idempotent). This is required for
- * the dashboard guard's community access verification.
- * Ends on the dashboard.
+ * After KERI identity recovery, navigates through the welcome overlay
+ * which runs membership checks (backend identity, community access,
+ * credentials). Ends on the dashboard.
  */
 export async function loginWithMnemonic(
   page: Page,
@@ -312,59 +313,21 @@ export async function loginWithMnemonic(
     page.getByText(/identity recovered/i),
   ).toBeVisible({ timeout: TIMEOUT.long });
 
-  // Ensure any-sync peer key is stored (needed for dashboard access verification).
-  // The private space API is idempotent — if the space exists it just persists the peer key.
-  await ensurePeerKeyStored(page, mnemonic);
-
+  // Click continue — now goes to welcome overlay instead of dashboard
   await page.getByRole('button', { name: /continue to dashboard/i }).click();
+
+  // Wait for welcome overlay to appear
+  await expect(
+    page.getByRole('heading', { name: /welcome to matou/i }),
+  ).toBeVisible({ timeout: TIMEOUT.long });
+
+  // Wait for all membership checks to pass (checkmarks appear)
+  // The overlay runs sequential checks with retries; allow up to 60s for all to complete
+  const continueBtn = page.getByRole('button', { name: /continue to dashboard/i });
+  await expect(continueBtn).toBeEnabled({ timeout: TIMEOUT.aidCreation });
+
+  await continueBtn.click();
   await expect(page).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.short });
-}
-
-/**
- * Ensure the backend identity is configured by calling POST /api/v1/identity/set.
- *
- * In per-user mode, the backend must know who it represents. This extracts the
- * user's AID from the Pinia identity store and calls identity/set with the
- * mnemonic, which triggers peer key derivation, SDK restart, and private space
- * creation. The call is idempotent — if already configured, it updates.
- *
- * @param page - The Playwright page with the user's session
- * @param mnemonic - The user's 12-word mnemonic
- * @param baseUrl - Backend URL to use (default: BACKEND_URL / port 9080)
- */
-async function ensurePeerKeyStored(
-  page: Page,
-  mnemonic: string[],
-  baseUrl: string = BACKEND_URL,
-): Promise<void> {
-  const aid = await page.evaluate(() => {
-    const app = (document.querySelector('#q-app') as any)?.__vue_app__;
-    if (!app) return '';
-    const pinia = app.config.globalProperties.$pinia;
-    const state = pinia?.state?.value?.identity;
-    return state?.currentAID?.prefix || '';
-  });
-
-  if (!aid) {
-    console.log('[Helpers] Warning: could not get AID for identity/set');
-    return;
-  }
-
-  try {
-    const response = await page.request.post(`${baseUrl}/api/v1/identity/set`, {
-      data: {
-        aid,
-        mnemonic: mnemonic.join(' '),
-      },
-    });
-    const body = await response.json();
-    console.log(
-      `[Helpers] Backend identity set for ${aid.slice(0, 12)}...` +
-        ` (peerId: ${body.peerId?.slice(0, 12)}..., space: ${body.privateSpaceId})`,
-    );
-  } catch (err) {
-    console.log('[Helpers] Warning: failed to set backend identity:', err);
-  }
 }
 
 // ---------------------------------------------------------------------------

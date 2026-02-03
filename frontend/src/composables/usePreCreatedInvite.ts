@@ -27,6 +27,11 @@ const SCHEMA_OOBI_URL = `${SCHEMA_SERVER_URL}/oobi/${MEMBERSHIP_SCHEMA_SAID}`;
 
 const WITNESS_AID = 'BBilc4-L3tFUnfM_wJr4S4OJanAv_VmF_dJNN6vkf2Ha';
 
+// KERIA CESR URL as seen from inside Docker (used for bare OOBI resolution).
+// Bare OOBIs (/oobi/{prefix}) serve the full KEL via hab.replay() and don't
+// require an agent end role, unlike /oobi/{prefix}/agent/{agentId} OOBIs.
+const KERIA_DOCKER_URL = import.meta.env.VITE_KERIA_DOCKER_CESR_URL || 'http://keria:3902';
+
 export function usePreCreatedInvite() {
   const adminClient = useKERIClient();
 
@@ -99,25 +104,57 @@ export function usePreCreatedInvite() {
 
       // Find org AID name from admin's identifiers
       const adminAids = await adminSignifyClient.identifiers().list();
+      const adminAgentId = adminSignifyClient.agent?.pre;
       for (const aid of adminAids.aids) {
         try {
-          const oobiResult = await adminSignifyClient.oobis().get(aid.name, 'agent');
-          const oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
-          if (oobi) {
-            // OOBI resolution is server-side — use raw URL
-            const resolveOp = await inviteeClient.oobis().resolve(oobi, `admin-${aid.name}`);
-            await inviteeClient.operations().wait(resolveOp, { signal: AbortSignal.timeout(30000) });
-            console.log(`[PreCreatedInvite] Invitee resolved admin OOBI for ${aid.name}`);
+          let oobiResult = await adminSignifyClient.oobis().get(aid.name, 'agent');
+          let oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
+
+          // If no agent OOBI exists (e.g. group AID created without end role),
+          // add the agent end role so the OOBI can be served via KERIA.
+          if (!oobi && adminAgentId) {
+            console.log(`[PreCreatedInvite] Adding agent end role to "${aid.name}"...`);
+            try {
+              const endRoleResult = await adminSignifyClient.identifiers().addEndRole(aid.name, 'agent', adminAgentId);
+              const endRoleOp = await endRoleResult.op();
+              await adminSignifyClient.operations().wait(endRoleOp, { signal: AbortSignal.timeout(30000) });
+              console.log(`[PreCreatedInvite] Agent end role added to "${aid.name}"`);
+
+              oobiResult = await adminSignifyClient.oobis().get(aid.name, 'agent');
+              oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
+            } catch (roleErr) {
+              console.warn(`[PreCreatedInvite] Failed to add end role for ${aid.name}:`, roleErr);
+            }
           }
+
+          // Fall back to bare KERIA OOBI if no agent OOBI is available.
+          // Group AIDs (e.g. org AID) can't have agent end roles added via
+          // the single-sig API, so oobis().get() returns nothing. The bare
+          // OOBI (/oobi/{prefix}) serves the full KEL via hab.replay() and
+          // doesn't require an agent end role.
+          if (!oobi) {
+            oobi = `${KERIA_DOCKER_URL}/oobi/${aid.prefix}`;
+            console.log(`[PreCreatedInvite] Using bare KERIA OOBI for ${aid.name}: ${oobi}`);
+          }
+
+          const resolveOp = await inviteeClient.oobis().resolve(oobi, `admin-${aid.name}`);
+          await inviteeClient.operations().wait(resolveOp, { signal: AbortSignal.timeout(30000) });
+          console.log(`[PreCreatedInvite] Invitee resolved admin OOBI for ${aid.name}`);
         } catch (oobiErr) {
           console.warn(`[PreCreatedInvite] Failed to resolve OOBI for ${aid.name}:`, oobiErr);
         }
       }
 
-      // Step 5: Resolve schema OOBI on admin's agent
+      // Step 5: Resolve schema OOBI on both agents
+      // The invitee's agent needs the schema to verify and store the credential
+      // after IPEX admit; the admin needs it for credential issuance.
       progress.value = 'Loading credential schema...';
       await adminClient.resolveOOBI(SCHEMA_OOBI_URL, MEMBERSHIP_SCHEMA_SAID);
-      console.log('[PreCreatedInvite] Schema OOBI resolved');
+      console.log('[PreCreatedInvite] Schema OOBI resolved on admin agent');
+
+      const schemaResolveOp = await inviteeClient.oobis().resolve(SCHEMA_OOBI_URL, MEMBERSHIP_SCHEMA_SAID);
+      await inviteeClient.operations().wait(schemaResolveOp, { signal: AbortSignal.timeout(30000) });
+      console.log('[PreCreatedInvite] Schema OOBI resolved on invitee agent');
 
       // Step 5b: Generate space invite keys (mirrors useAdminActions.ts)
       progress.value = 'Generating community space access...';
@@ -212,7 +249,28 @@ export function usePreCreatedInvite() {
       );
       console.log('[PreCreatedInvite] Credential issued and IPEX grant sent');
 
-      // Step 6b: Init member profiles in readonly + community spaces
+      // Step 6b: Re-resolve admin OOBI on invitee's agent.
+      // Credential issuance (step 6) created new IXN events on the admin's AID.
+      // The invitee's agent resolved the admin's OOBI at step 4, before those events.
+      // Without re-resolution, the grant arrives but the invitee's agent can't verify
+      // it (admin's key state is stale) → grant gets escrowed → admit silently fails.
+      progress.value = 'Syncing credential state...';
+      for (const aid of adminAids.aids) {
+        try {
+          const oobiResult = await adminSignifyClient.oobis().get(aid.name, 'agent');
+          let oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
+          if (!oobi) {
+            oobi = `${KERIA_DOCKER_URL}/oobi/${aid.prefix}`;
+          }
+          const resolveOp = await inviteeClient.oobis().resolve(oobi, `admin-${aid.name}`);
+          await inviteeClient.operations().wait(resolveOp, { signal: AbortSignal.timeout(30000) });
+        } catch (oobiErr) {
+          console.warn(`[PreCreatedInvite] Post-grant OOBI re-resolve failed for ${aid.name}:`, oobiErr);
+        }
+      }
+      console.log('[PreCreatedInvite] Admin OOBI re-resolved on invitee agent');
+
+      // Step 6c: Init member profiles in readonly + community spaces
       try {
         await initMemberProfiles({
           memberAid: inviteeAid.prefix,

@@ -412,6 +412,32 @@ func (c *SDKClient) DeriveSpaceID(ctx context.Context, ownerAID string, spaceTyp
 	return spaceID, nil
 }
 
+// DeriveSpaceIDWithKeys computes the deterministic space ID for an owner+type
+// using the provided key set. Unlike DeriveSpaceID, this uses the KeySet's
+// master key instead of generating a random one, making it fully deterministic.
+func (c *SDKClient) DeriveSpaceIDWithKeys(ctx context.Context, ownerAID string, spaceType string, keys *SpaceKeySet) (string, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	if !c.initialized {
+		return "", fmt.Errorf("client not initialized")
+	}
+
+	payload := spacepayloads.SpaceDerivePayload{
+		SigningKey:   keys.SigningKey,
+		MasterKey:    keys.MasterKey,
+		SpaceType:    "",
+		SpacePayload: []byte(ownerAID),
+	}
+
+	spaceID, err := c.spaceService.DeriveId(ctx, payload)
+	if err != nil {
+		return "", fmt.Errorf("deriving space ID with keys: %w", err)
+	}
+
+	return spaceID, nil
+}
+
 // Deprecated: AddToACL builds raw JSON as a proto record which is rejected by the
 // consensus node. Use MatouACLManager.CreateOpenInvite/JoinWithInvite instead.
 func (c *SDKClient) AddToACL(ctx context.Context, spaceID string, peerID string, permissions []string) error {

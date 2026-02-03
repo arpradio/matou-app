@@ -10,6 +10,11 @@ import { useOnboardingStore } from 'stores/onboarding';
 import { useAppStore } from 'stores/app';
 import { setBackendIdentity, createOrUpdateProfile } from 'src/lib/api/client';
 import { useIdentityStore } from 'stores/identity';
+import { secureStorage } from 'src/lib/secureStorage';
+
+// KERIA CESR URL as seen from inside Docker (used for OOBI resolution).
+// OOBI resolution is server-side — KERIA resolves via its Docker network.
+const KERIA_DOCKER_URL = import.meta.env.VITE_KERIA_DOCKER_CESR_URL || 'http://keria:3902';
 
 export type ClaimStep = 'connecting' | 'admitting' | 'rotating' | 'securing' | 'done' | 'error';
 
@@ -18,6 +23,22 @@ export interface ValidateResult {
   prefix: string;
   passcode: string;
   mnemonic: string[];
+}
+
+/** Retry a profile creation call with backoff (space key derivation is async after join) */
+async function retryProfile(
+  fn: () => Promise<{ success: boolean; error?: string }>,
+  maxAttempts = 5,
+  baseDelay = 1500,
+): Promise<{ success: boolean; error?: string }> {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const result = await fn();
+    if (result.success) return result;
+    if (attempt === maxAttempts) return result;
+    console.log(`[ClaimIdentity] Profile creation attempt ${attempt}/${maxAttempts} failed, retrying...`);
+    await new Promise(r => setTimeout(r, baseDelay * attempt));
+  }
+  return { success: false, error: 'max retries exceeded' };
 }
 
 export function useClaimIdentity() {
@@ -131,6 +152,40 @@ export function useClaimIdentity() {
         readOnlySpaceId?: string;
       } | null = null;
 
+      // Pre-resolve grant senders' key state via KERIA OOBI.
+      // The grant may be escrowed on the invitee's KERIA agent because the
+      // sender's AID was not in kevers when the grant arrived (the OOBI
+      // resolution during invite creation can race with the grant delivery).
+      // Using a bare OOBI (/oobi/{prefix}) causes KERIA to serve the full
+      // key event log for the sender, populating kevers and triggering
+      // de-escrowing of the grant.
+      const resolvedSenders = new Set<string>();
+      for (const grant of grants) {
+        try {
+          const grantExn = await client.exchanges().get(grant.a.d);
+          const senderPrefix = grantExn.exn.i;
+          if (senderPrefix && !resolvedSenders.has(senderPrefix)) {
+            resolvedSenders.add(senderPrefix);
+            const senderOobi = `${KERIA_DOCKER_URL}/oobi/${senderPrefix}`;
+            console.log(`[ClaimIdentity] Resolving grant sender OOBI: ${senderOobi}`);
+            progress.value = 'Resolving credential issuer identity...';
+            const resolveOp = await client.oobis().resolve(senderOobi, `grant-sender-${senderPrefix}`);
+            await client.operations().wait(resolveOp, { signal: AbortSignal.timeout(30000) });
+            console.log(`[ClaimIdentity] Sender ${senderPrefix} OOBI resolved`);
+          }
+        } catch (oobiErr) {
+          console.warn('[ClaimIdentity] Sender OOBI resolution failed:', oobiErr);
+        }
+      }
+
+      // Allow KERIA's escrow processor to de-escrow the grant now that the
+      // sender's key state is in kevers. The escrow loop runs on a tick;
+      // 10 seconds gives the processor several cycles to de-escrow.
+      if (resolvedSenders.size > 0) {
+        console.log('[ClaimIdentity] Waiting for escrow processing...');
+        await new Promise(r => setTimeout(r, 10000));
+      }
+
       for (const grant of grants) {
         try {
           const grantExn = await client.exchanges().get(grant.a.d);
@@ -148,11 +203,21 @@ export function useClaimIdentity() {
             } catch { /* not JSON */ }
           }
 
-          const [admit, sigs, atc] = await client.ipex().admit({
-            senderName: aid.name,
-            recipient: grantSender,
-            grantSaid: grant.a.d,
-          });
+          // Submit admit with empty embeds. KERIA's sendAdmit() for single-sig
+          // AIDs does not process path labels — the Admitter background task
+          // retrieves ACDC/ISS/ANC data from the GRANT's cloned attachments.
+          // Including embeds here would cause psr.parseOne() to fail looking
+          // for path-labeled CESR attachments that aren't present.
+          const hab = await client.identifiers().get(aid.name);
+          const [admit, sigs, atc] = await client.exchanges().createExchangeMessage(
+            hab,
+            '/ipex/admit',
+            { m: '' },
+            {},
+            grantSender,
+            undefined,
+            grant.a.d,
+          );
           await client.ipex().submitAdmit(aid.name, admit, sigs, atc, [grantSender]);
           await client.notifications().mark(grant.i);
           console.log(`[ClaimIdentity] Admitted grant ${grant.a.d}`);
@@ -162,9 +227,24 @@ export function useClaimIdentity() {
         }
       }
 
-      // Verify credentials in wallet
-      const credentials = await client.credentials().list();
-      console.log(`[ClaimIdentity] Credentials in wallet: ${credentials.length}`);
+      // Wait for credentials to appear in wallet (IPEX admit is async —
+      // KERIA processes the admit in the background after submitAdmit returns)
+      if (grants.length > 0) {
+        progress.value = 'Waiting for credentials to be processed...';
+        let credentials: any[] = [];
+        for (let attempt = 1; attempt <= 15; attempt++) {
+          credentials = await client.credentials().list();
+          console.log(`[ClaimIdentity] Credential poll attempt ${attempt}: ${credentials.length} credentials`);
+          if (credentials.length > 0) break;
+          await new Promise(r => setTimeout(r, 2000));
+        }
+        if (credentials.length === 0) {
+          throw new Error('No credentials appeared in wallet after IPEX admit — credential grant was not processed');
+        }
+        for (const cred of credentials) {
+          console.log(`[ClaimIdentity] Credential SAID: ${cred.sad?.d}, schema: ${cred.sad?.s}, status: ${cred.status?.s}`);
+        }
+      }
 
       // Step 3: Rotate AID keys (take cryptographic ownership)
       // The agent passcode is NOT rotated — the invite code encodes the mnemonic
@@ -177,59 +257,52 @@ export function useClaimIdentity() {
       console.log('[ClaimIdentity] AID keys rotated');
 
       // Persist session (same passcode — no agent rotation)
-      localStorage.setItem('matou_passcode', passcode);
+      await secureStorage.setItem('matou_passcode', passcode);
 
       // Step 4: Set backend identity (derives peer key, restarts SDK, creates private space)
       step.value = 'securing';
       progress.value = 'Configuring backend identity...';
 
-      try {
-        const onboardingMnemonic = useOnboardingStore().mnemonic.words;
-        if (onboardingMnemonic.length > 0) {
-          const mnemonicStr = onboardingMnemonic.join(' ');
-          localStorage.setItem('matou_mnemonic', mnemonicStr);
-
-          const appStore = useAppStore();
-          const identityResult = await setBackendIdentity({
-            aid: aid.prefix,
-            mnemonic: mnemonicStr,
-            orgAid: appStore.orgAid ?? undefined,
-            communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
-          });
-          if (identityResult.success) {
-            console.log('[ClaimIdentity] Backend identity set, peer:', identityResult.peerId,
-              'private space:', identityResult.privateSpaceId);
-          } else {
-            console.warn('[ClaimIdentity] Backend identity set failed:', identityResult.error);
-          }
-        }
-      } catch (err) {
-        // Non-fatal - backend identity can be set on session restore
-        console.warn('[ClaimIdentity] Backend identity configuration deferred:', err);
+      const onboardingMnemonic = useOnboardingStore().mnemonic.words;
+      if (onboardingMnemonic.length === 0) {
+        throw new Error('No mnemonic available for backend identity setup');
       }
+      const mnemonicStr = onboardingMnemonic.join(' ');
+      await secureStorage.setItem('matou_mnemonic', mnemonicStr);
+
+      const appStore = useAppStore();
+      const identityResult = await setBackendIdentity({
+        aid: aid.prefix,
+        mnemonic: mnemonicStr,
+        orgAid: appStore.orgAid ?? undefined,
+        communitySpaceId: appStore.orgConfig?.communitySpaceId ?? undefined,
+        readOnlySpaceId: appStore.orgConfig?.readOnlySpaceId ?? undefined,
+        mode: 'claim',
+      });
+      if (!identityResult.success) {
+        throw new Error(`Backend identity setup failed: ${identityResult.error || 'unknown error'}`);
+      }
+      console.log('[ClaimIdentity] Backend identity set, peer:', identityResult.peerId,
+        'private space:', identityResult.privateSpaceId);
 
       // Populate identity store so router guard allows /dashboard access
       const identityStore = useIdentityStore();
       identityStore.setCurrentAID({ name: aid.name, prefix: aid.prefix, state: aid.state ?? null });
 
-      // Join community + readonly spaces if invite data was embedded in grant
-      if (spaceInvite) {
-        try {
-          const joined = await identityStore.joinCommunitySpace({
-            inviteKey: spaceInvite.inviteKey,
-            spaceId: spaceInvite.spaceId,
-            readOnlyInviteKey: spaceInvite.readOnlyInviteKey,
-            readOnlySpaceId: spaceInvite.readOnlySpaceId,
-          });
-          if (joined) {
-            console.log('[ClaimIdentity] Joined community space');
-          } else {
-            console.warn('[ClaimIdentity] Community join failed');
-          }
-        } catch (joinErr) {
-          console.warn('[ClaimIdentity] Community join deferred:', joinErr);
-        }
+      // Join community + readonly spaces (required — fail if missing or unsuccessful)
+      if (!spaceInvite) {
+        throw new Error('No community space invite found in credential grant');
       }
+      const joined = await identityStore.joinCommunitySpace({
+        inviteKey: spaceInvite.inviteKey,
+        spaceId: spaceInvite.spaceId,
+        readOnlyInviteKey: spaceInvite.readOnlyInviteKey,
+        readOnlySpaceId: spaceInvite.readOnlySpaceId,
+      });
+      if (!joined) {
+        throw new Error('Failed to join community and readonly spaces');
+      }
+      console.log('[ClaimIdentity] Joined community space');
 
       // Populate identity info for the dashboard
       onboardingStore.setUserAID(aid.prefix);
@@ -237,31 +310,30 @@ export function useClaimIdentity() {
         onboardingStore.updateProfile({ name: aid.name });
       }
 
-      // Create profiles after claiming identity
-      try {
-        const displayName = onboardingStore.profile.name || aid.name;
-        const now = new Date().toISOString();
+      // Create profiles (required — retry with backoff since space key derivation is async)
+      progress.value = 'Creating profiles...';
+      const displayName = onboardingStore.profile.name || aid.name;
+      const now = new Date().toISOString();
 
-        // Get credential SAID from wallet for PrivateProfile
-        let credSAID = '';
-        try {
-          const creds = await client.credentials().list();
-          if (creds.length > 0) {
-            credSAID = creds[0].sad?.d || '';
-          }
-        } catch {
-          // Non-fatal
-        }
+      const creds = await client.credentials().list();
+      const credSAID = creds.length > 0 ? (creds[0].sad?.d || '') : '';
 
-        // PrivateProfile in personal space
-        await createOrUpdateProfile('PrivateProfile', {
+      // PrivateProfile in personal space
+      const privateResult = await retryProfile(() =>
+        createOrUpdateProfile('PrivateProfile', {
           membershipCredentialSAID: credSAID,
           privacySettings: { allowEndorsements: true, allowDirectMessages: true },
           appPreferences: { mode: 'light', language: 'es' },
-        }).catch(err => console.warn('[ClaimIdentity] PrivateProfile creation deferred:', err));
+        }),
+      );
+      if (!privateResult.success) {
+        throw new Error(`PrivateProfile creation failed: ${privateResult.error || 'unknown'}`);
+      }
 
-        // SharedProfile in community space
-        await createOrUpdateProfile('SharedProfile', {
+      // SharedProfile in community space (required — community space keys are
+      // now persisted during join, so this should succeed after retries)
+      const sharedResult = await retryProfile(() =>
+        createOrUpdateProfile('SharedProfile', {
           aid: aid.prefix,
           displayName,
           bio: onboardingStore.profile.bio || '',
@@ -272,12 +344,13 @@ export function useClaimIdentity() {
           createdAt: now,
           updatedAt: now,
           typeVersion: 1,
-        }).catch(err => console.warn('[ClaimIdentity] SharedProfile creation deferred:', err));
-
-        console.log('[ClaimIdentity] Profiles created');
-      } catch (profileErr) {
-        console.warn('[ClaimIdentity] Profile creation deferred:', profileErr);
+        }),
+      );
+      if (!sharedResult.success) {
+        throw new Error(`SharedProfile creation failed: ${sharedResult.error || 'unknown'}`);
       }
+
+      console.log('[ClaimIdentity] Profiles created');
 
       // Done
       step.value = 'done';
