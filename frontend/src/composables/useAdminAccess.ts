@@ -37,6 +37,12 @@ export function useAdminAccess() {
     permissions.value.includes('steward')
   );
 
+  // Check if user has a steward role (Operations Steward or Community Steward)
+  const isSteward = computed(() => {
+    const role = (adminCredential.value?.role || '').toLowerCase();
+    return role.includes('operations steward') || role.includes('community steward');
+  });
+
   /**
    * Check if the current user has admin status
    * Looks for Operations Steward credential or credentials with admin permissions
@@ -188,6 +194,7 @@ export function useAdminAccess() {
 
     // Computed
     canApproveRegistrations,
+    isSteward,
 
     // Actions
     checkAdminStatus,

@@ -103,7 +103,7 @@
           </div>
           <div class="stats-row">
             <button
-              v-for="(stat, index) in notificationStats"
+              v-for="(stat, index) in notificationStats.filter(s => s.visible)"
               :key="index"
               class="stat-item"
             >
@@ -117,8 +117,8 @@
         </div>
       </section>
 
-      <!-- Admin Section (conditional) -->
-      <div v-if="isAdmin" class="admin-area px-6 mb-6">
+      <!-- Admin Section (conditional) - Only for Operations Steward or Community Steward -->
+      <div v-if="isSteward" class="admin-area px-6 mb-6">
         <div class="admin-actions mb-4">
           <button
             class="invite-btn"
@@ -149,20 +149,6 @@
         <div class="content-grid">
           <!-- Left Column -->
           <div class="left-column">
-            <!-- Membership Card -->
-            <div class="card membership-card">
-              <div class="card-row">
-                <div class="membership-icon">
-                  <Check class="check-icon" />
-                </div>
-                <div class="membership-info">
-                  <h3 class="membership-title">Matou Member</h3>
-                  <p class="membership-subtitle">Credential Active</p>
-                </div>
-                <span class="verified-badge">Verified</span>
-              </div>
-            </div>
-
             <!-- Community Activity -->
             <div class="card community-card">
               <h3 class="card-title">Community Activity</h3>
@@ -173,7 +159,7 @@
                   </div>
                   <div class="activity-info">
                     <h4>Growing Together</h4>
-                    <p>247 active members this week</p>
+                    <p>{{ newMembersThisWeek }} new {{ newMembersThisWeek === 1 ? 'member' : 'members' }} this week</p>
                   </div>
                 </div>
                 <div class="activity-item">
@@ -181,8 +167,8 @@
                     <Users class="icon text-accent" />
                   </div>
                   <div class="activity-info">
-                    <h4>New Proposals</h4>
-                    <p>5 governance proposals need your vote</p>
+                    <h4>Monthly Growth</h4>
+                    <p>{{ newMembersThisMonth }} new {{ newMembersThisMonth === 1 ? 'member' : 'members' }} this month</p>
                   </div>
                 </div>
               </div>
@@ -244,7 +230,6 @@ import {
   Users,
   Shield,
   TrendingUp,
-  Check,
   CoinsIcon,
   UserPlus,
 } from 'lucide-vue-next';
@@ -264,7 +249,7 @@ import MemberProfileDialog from 'src/components/profiles/MemberProfileDialog.vue
 const store = useOnboardingStore();
 
 // Admin functionality
-const { isAdmin, checkAdminStatus } = useAdminAccess();
+const { isAdmin, isSteward, checkAdminStatus } = useAdminAccess();
 const {
   pendingRegistrations,
   isPolling,
@@ -345,10 +330,10 @@ onMounted(async () => {
   // Fetch moon phase data
   await fetchMoonPhase();
 
-  // Check if user is admin
-  const adminStatus = await checkAdminStatus();
-  if (adminStatus) {
-    console.log('[Dashboard] User is admin, starting registration polling');
+  // Check if user is admin/steward
+  await checkAdminStatus();
+  if (isSteward.value) {
+    console.log('[Dashboard] User is steward, starting registration polling');
     startPolling();
   }
 });
@@ -388,16 +373,17 @@ const userAvatarUrl = computed(() => {
   return avatar ? getFileUrl(avatar) : null;
 });
 
-// Stats data - computed to show real pending registration count for admins
+// Stats data - computed to show real pending registration count for stewards only
 const notificationStats = computed(() => [
   {
     label: 'Pending Registrations',
-    value: isAdmin.value ? pendingRegistrations.value.length : 0,
+    value: isSteward.value ? pendingRegistrations.value.length : 0,
     icon: Users,
+    visible: isSteward.value,
   },
-  { label: 'New Transactions', value: 0, icon: CoinsIcon },
-  { label: 'Proposal Updates', value: 0, icon: Vote },
-  { label: 'Contribution Actions', value: 0, icon: Target },
+  { label: 'New Transactions', value: 0, icon: CoinsIcon, visible: true },
+  { label: 'Proposal Updates', value: 0, icon: Vote, visible: true },
+  { label: 'Contribution Actions', value: 0, icon: Target, visible: true },
 ]);
 
 // Live member data from profiles store (with fallback to static data)
@@ -410,6 +396,36 @@ const liveMembers = computed(() => {
     }));
   }
   return [];
+});
+
+// Calculate new members this week
+const newMembersThisWeek = computed(() => {
+  const now = new Date();
+  const startOfWeek = new Date(now);
+  startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  return profilesStore.communityReadOnlyProfiles.filter(p => {
+    const data = (p.data as Record<string, unknown>) || {};
+    const memberSince = data.memberSince as string;
+    if (!memberSince) return false;
+    const joinDate = new Date(memberSince);
+    return joinDate >= startOfWeek;
+  }).length;
+});
+
+// Calculate new members this month
+const newMembersThisMonth = computed(() => {
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  return profilesStore.communityReadOnlyProfiles.filter(p => {
+    const data = (p.data as Record<string, unknown>) || {};
+    const memberSince = data.memberSince as string;
+    if (!memberSince) return false;
+    const joinDate = new Date(memberSince);
+    return joinDate >= startOfMonth;
+  }).length;
 });
 
 function findCommunityProfile(sharedProfile: Record<string, unknown>): Record<string, unknown> | undefined {
@@ -885,57 +901,6 @@ async function handleRefresh() {
   font-weight: 600;
   color: var(--matou-foreground);
   margin: 0 0 0.75rem 0;
-}
-
-// Membership Card
-.membership-card {
-  .card-row {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-}
-
-.membership-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: var(--matou-radius);
-  background-color: var(--matou-secondary);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.check-icon {
-  width: 20px;
-  height: 20px;
-  color: var(--matou-primary);
-}
-
-.membership-info {
-  flex: 1;
-}
-
-.membership-title {
-  font-size: 0.95rem;
-  font-weight: 600;
-  color: var(--matou-foreground);
-  margin: 0;
-}
-
-.membership-subtitle {
-  font-size: 0.8rem;
-  color: var(--matou-muted-foreground);
-  margin: 0.125rem 0 0;
-}
-
-.verified-badge {
-  font-size: 0.75rem;
-  font-weight: 500;
-  color: var(--matou-accent);
-  background-color: rgba(74, 157, 156, 0.1);
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
 }
 
 // Community Card
