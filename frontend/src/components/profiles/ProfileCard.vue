@@ -35,7 +35,9 @@ defineEmits<{
 const displayName = computed(() => (props.profile?.displayName as string) || 'Unknown');
 
 const avatarUrl = computed(() => {
-  const ref = props.profile?.avatar as string;
+  // Check SharedProfile avatar first, then CommunityProfile avatar as fallback
+  const ref = (props.profile?.avatar as string) || (props.communityProfile?.avatar as string);
+  console.log('[ProfileCard] Avatar ref for', props.profile?.displayName, ':', ref, 'profile:', props.profile);
   if (!ref) return '';
   if (ref.startsWith('http') || ref.startsWith('data:')) return ref;
   return getFileUrl(ref);

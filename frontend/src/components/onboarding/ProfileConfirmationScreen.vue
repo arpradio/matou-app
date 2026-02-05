@@ -1,20 +1,15 @@
 <template>
   <div class="profile-confirmation-screen h-full flex flex-col bg-background">
     <!-- Header -->
-    <div class="p-6 md:p-8 pb-4 border-b border-border">
-      <div class="flex items-center gap-3 mb-2">
-        <div class="w-10 h-10 rounded-full bg-accent/20 flex items-center justify-center">
-          <CheckCircle2 class="w-5 h-5 text-accent" />
-        </div>
-        <h1>{{ isClaim ? 'Save Your Recovery Phrase' : 'Identity Created Successfully' }}</h1>
-      </div>
-      <p class="text-muted-foreground">
-        {{ isClaim
-          ? 'This phrase lets you recover your identity — write it down and keep it safe'
-          : 'Save your recovery phrase - it\'s the only way to restore your identity'
-        }}
-      </p>
-    </div>
+    <OnboardingHeader
+      :title="isClaim ? 'Save Your Recovery Phrase' : 'Identity Created Successfully'"
+      :subtitle="isClaim
+        ? 'This phrase lets you recover your identity — write it down and keep it safe'
+        : 'Save your recovery phrase - it\'s the only way to restore your identity'"
+      :show-back-button="false"
+      :show-icon="true"
+      :icon="CheckCircle2"
+    />
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-6 md:p-8">
@@ -31,7 +26,7 @@
               </div>
               <div class="flex items-center gap-1">
                 <Shield class="w-3 h-3 opacity-75" />
-                <span class="text-[10px] opacity-75">DECENTRALIZED</span>
+                <span class="text-[10px] opacity-75">KERI</span>
               </div>
             </div>
 
@@ -157,6 +152,7 @@ import {
   Copy,
 } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
+import OnboardingHeader from './OnboardingHeader.vue';
 import { useOnboardingStore } from 'stores/onboarding';
 
 const store = useOnboardingStore();
@@ -194,10 +190,10 @@ function handleContinue() {
   background-color: var(--matou-background);
 }
 
+// Header styles are now handled by OnboardingHeader component
+
 h1 {
-  font-size: 1.5rem;
   font-weight: 600;
-  color: var(--matou-foreground);
 }
 
 .id-card {

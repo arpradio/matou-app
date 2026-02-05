@@ -61,6 +61,7 @@
         @approve="handleApprove"
         @decline="handleDecline"
         @message="openMessageModal"
+        @view="openViewModal"
       />
     </div>
 
@@ -126,7 +127,13 @@ const selectedRegistration = ref<PendingRegistration | null>(null);
 const showSuccessToast = ref(false);
 const successMessage = ref('');
 
-// Open modal for message
+// Open modal for viewing registration details
+function openViewModal(registration: PendingRegistration) {
+  selectedRegistration.value = registration;
+  showModal.value = true;
+}
+
+// Open modal for message (same as view but could have different state)
 function openMessageModal(registration: PendingRegistration) {
   selectedRegistration.value = registration;
   showModal.value = true;

@@ -1,12 +1,11 @@
 <template>
   <div class="claim-processing-screen h-full flex flex-col bg-background">
     <!-- Header -->
-    <div class="p-6 md:p-8 pb-4 border-b border-border">
-      <h1 class="mb-2">Claiming Your Identity</h1>
-      <p class="text-muted-foreground">
-        Securing your identity with new cryptographic keys
-      </p>
-    </div>
+    <OnboardingHeader
+      title="Claiming Your Identity"
+      subtitle="Securing your identity with new cryptographic keys"
+      :show-back-button="false"
+    />
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-6 md:p-8">
@@ -130,6 +129,7 @@ import {
   XCircle,
 } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
+import OnboardingHeader from './OnboardingHeader.vue';
 import { useClaimIdentity, type ClaimStep } from 'composables/useClaimIdentity';
 import { useOnboardingStore } from 'stores/onboarding';
 

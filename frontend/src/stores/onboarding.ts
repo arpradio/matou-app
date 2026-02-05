@@ -66,7 +66,7 @@ export type ParticipationInterest = typeof PARTICIPATION_INTERESTS[number]['valu
 /**
  * Onboarding flow path
  */
-export type OnboardingPath = 'register' | 'recover' | 'setup' | 'claim' | null;
+export type OnboardingPath = 'register' | 'recover' | 'setup' | 'claim' | 'returning' | null;
 
 /**
  * User profile data
@@ -78,6 +78,8 @@ export interface ProfileData {
   avatar: File | null;
   avatarPreview: string | null; // Base64 or object URL for preview
   avatarFileRef: string | null; // Content-addressed fileRef from backend upload
+  avatarData: string | null; // Base64-encoded avatar data (for registration message)
+  avatarMimeType: string | null; // MIME type of avatar
   participationInterests: ParticipationInterest[];
   customInterests: string;
   hasAgreedToTerms: boolean;
@@ -116,6 +118,8 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     avatar: null,
     avatarPreview: null,
     avatarFileRef: null,
+    avatarData: null,
+    avatarMimeType: null,
     participationInterests: [],
     customInterests: '',
     hasAgreedToTerms: false,
@@ -215,6 +219,8 @@ export const useOnboardingStore = defineStore('onboarding', () => {
       avatar: null,
       avatarPreview: null,
       avatarFileRef: null,
+      avatarData: null,
+      avatarMimeType: null,
       participationInterests: [],
       customInterests: '',
       hasAgreedToTerms: false,

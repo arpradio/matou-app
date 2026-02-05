@@ -20,16 +20,12 @@
     </Transition>
 
     <!-- Header -->
-    <div class="p-6 md:p-8 pb-4 border-b border-border">
-      <button
-        class="mb-4 text-muted-foreground hover:text-foreground transition-colors"
-        @click="onBack"
-      >
-        <ArrowLeft class="w-5 h-5" />
-      </button>
-      <h1 class="mb-2">Recover Your Identity</h1>
-      <p class="text-muted-foreground">Enter your 12-word recovery phrase to restore access</p>
-    </div>
+    <OnboardingHeader
+      title="Recover Your Identity"
+      subtitle="Enter your 12-word recovery phrase to restore access"
+      :show-back-button="true"
+      @back="onBack"
+    />
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-6 md:p-8">

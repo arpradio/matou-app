@@ -36,19 +36,15 @@
     </Transition>
 
     <!-- Header -->
-    <div class="p-6 md:p-8 pb-4 border-b border-border">
-      <button
-        class="mb-4 text-muted-foreground hover:text-foreground transition-colors"
-        @click="onBack"
-      >
-        <ArrowLeft class="w-5 h-5" />
-      </button>
-      <h1 class="mb-2">{{ isClaim ? 'Claim Your Profile' : 'Create Your Profile' }}</h1>
-      <p class="text-muted-foreground">Tell us about yourself and how you'd like to participate</p>
-    </div>
+    <OnboardingHeader
+      :title="isClaim ? 'Claim Your Profile' : 'Create Your Profile'"
+      subtitle="Tell us about yourself and how you'd like to participate"
+      :show-back-button="true"
+      @back="onBack"
+    />
 
     <!-- Content -->
-    <div class="flex-1 overflow-y-auto p-6 md:p-8">
+    <div ref="contentArea" class="flex-1 overflow-y-auto p-6 md:p-8">
       <form class="space-y-6 max-w-2xl mx-auto" @submit.prevent="handleSubmit">
         <!-- Profile Image -->
         <div class="space-y-3 pb-2">
@@ -230,10 +226,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, watch } from 'vue';
+import { ref, computed, watch, onMounted } from 'vue';
+import { useRouter } from 'vue-router';
 import { ArrowLeft, ArrowRight, User, Upload, X, Fingerprint, AlertCircle } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
 import MInput from '../base/MInput.vue';
+import OnboardingHeader from './OnboardingHeader.vue';
 import { useOnboardingStore, PARTICIPATION_INTERESTS, type ParticipationInterest } from 'stores/onboarding';
 import { useIdentityStore } from 'stores/identity';
 import { KERIClient } from 'src/lib/keri/client';
@@ -247,10 +245,12 @@ const props = withDefaults(defineProps<{
   isClaim: false,
 });
 
+const router = useRouter();
 const store = useOnboardingStore();
 const identityStore = useIdentityStore();
 
 const fileInput = ref<HTMLInputElement | null>(null);
+const contentArea = ref<HTMLElement | null>(null);
 const avatarPreview = ref<string | null>(store.profile.avatarPreview);
 const avatarFile = ref<File | null>(null);
 
@@ -288,6 +288,29 @@ const canSubmit = computed(() => {
   );
 });
 
+// Scroll to top when component mounts
+onMounted(() => {
+  // Use setTimeout to ensure DOM is fully rendered
+  setTimeout(() => {
+    // Scroll the component's content area
+    if (contentArea.value) {
+      contentArea.value.scrollTop = 0;
+    }
+    // Scroll page container
+    const pageContainer = document.querySelector('.q-page-container');
+    if (pageContainer) {
+      pageContainer.scrollTop = 0;
+    }
+    // Scroll onboarding page
+    const onboardingPage = document.querySelector('.onboarding-page');
+    if (onboardingPage) {
+      onboardingPage.scrollTop = 0;
+    }
+    // Scroll window as fallback
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }, 100);
+});
+
 // Watch for name changes and clear error
 watch(() => formData.value.name, () => {
   errors.value.name = '';
@@ -306,42 +329,55 @@ function handleFileSelect(event: Event) {
   const file = target.files?.[0];
 
   if (file) {
-    // Validate file size (max 5MB)
-    if (file.size > 5 * 1024 * 1024) {
-      alert('Image must be less than 5MB');
+    // Validate file size (max 2MB for inclusion in message)
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Image must be less than 2MB');
       return;
     }
 
-    // Create preview
+    // Create preview and store base64 data
     const reader = new FileReader();
     reader.onload = (e) => {
-      avatarPreview.value = e.target?.result as string;
+      const dataUrl = e.target?.result as string;
+      avatarPreview.value = dataUrl;
+
+      // Extract base64 data (remove "data:image/...;base64," prefix)
+      const base64Data = dataUrl.split(',')[1];
+      store.updateProfile({
+        avatar: file,
+        avatarData: base64Data,
+        avatarMimeType: file.type,
+      });
+      console.log('[ProfileForm] Avatar stored as base64, size:', base64Data.length, 'mime:', file.type);
     };
     reader.readAsDataURL(file);
 
-    // Store file for upload and in profile
+    // Store file for upload
     avatarFile.value = file;
-    store.updateProfile({ avatar: file });
   }
 }
 
 function removeAvatar() {
   avatarPreview.value = null;
   avatarFile.value = null;
-  store.updateProfile({ avatar: null, avatarPreview: null, avatarFileRef: null });
+  store.updateProfile({
+    avatar: null,
+    avatarPreview: null,
+    avatarFileRef: null,
+    avatarData: null,
+    avatarMimeType: null,
+  });
   if (fileInput.value) {
     fileInput.value.value = '';
   }
 }
 
 function showTerms() {
-  // TODO: Open terms modal
-  console.log('Show terms');
+  router.push('/community-guidelines');
 }
 
 function showPrivacy() {
-  // TODO: Open privacy modal
-  console.log('Show privacy');
+  router.push('/privacy-policy');
 }
 
 async function handleSubmit() {
@@ -371,8 +407,10 @@ async function handleSubmit() {
   });
 
   // Upload avatar if selected
+  console.log('[ProfileForm] Avatar file selected:', !!avatarFile.value);
   if (avatarFile.value) {
     try {
+      console.log('[ProfileForm] Uploading avatar...');
       const result = await uploadFile(avatarFile.value);
       if (result.fileRef) {
         store.updateProfile({ avatarFileRef: result.fileRef });
@@ -381,8 +419,10 @@ async function handleSubmit() {
         console.warn('[ProfileForm] Avatar upload failed:', result.error);
       }
     } catch (err) {
-      console.warn('[ProfileForm] Avatar upload deferred:', err);
+      console.warn('[ProfileForm] Avatar upload error:', err);
     }
+  } else {
+    console.log('[ProfileForm] No avatar file to upload');
   }
 
   // In claim mode, skip identity creation — just save profile and continue
@@ -460,11 +500,7 @@ function onBack() {
   background-color: var(--matou-background);
 }
 
-h1 {
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: var(--matou-foreground);
-}
+// h1 styles are now handled in the header-gradient section
 
 textarea {
   &:focus {

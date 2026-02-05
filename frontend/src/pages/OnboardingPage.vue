@@ -15,13 +15,14 @@
         @retry="handleRetry"
         @approved="handleApproved"
         @continue-to-dashboard="handleContinueToDashboard"
+        @needs-approval="handleNeedsApproval"
       />
     </Transition>
   </q-page>
 </template>
 
 <script setup lang="ts">
-import { computed, watch } from 'vue';
+import { computed, watch, nextTick } from 'vue';
 import { useRouter } from 'vue-router';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useIdentityStore } from 'stores/identity';
@@ -105,6 +106,11 @@ const handleContinueToDashboard = async () => {
   store.navigateTo('main');
 };
 
+const handleNeedsApproval = () => {
+  // Redirect to pending-approval when returning user has no credential
+  store.navigateTo('pending-approval');
+};
+
 // Navigation handlers
 const startInviteFlow = () => {
   store.setPath('claim');
@@ -145,7 +151,15 @@ const handleContinue = (data?: unknown) => {
     if (current === 'recovery') {
       store.navigateTo('welcome-overlay');
     } else if (current === 'welcome-overlay') {
-      store.navigateTo('main');
+      // Route directly to dashboard to avoid flash
+      router.push('/dashboard');
+      return;
+    }
+  } else if (path === 'returning') {
+    // Returning user flow: welcome-overlay → dashboard (if credential exists)
+    if (current === 'welcome-overlay') {
+      router.push('/dashboard');
+      return;
     }
   } else if (path === 'setup') {
     // Admin setup flow: profile-confirmation → mnemonic-verification → pending-approval
@@ -158,7 +172,7 @@ const handleContinue = (data?: unknown) => {
       store.navigateTo(next as typeof store.currentScreen);
     }
   } else if (path === 'claim') {
-    // Claim flow: invite-code → claim-welcome → profile-form → claim-processing → profile-confirmation → mnemonic-verification → welcome-overlay → main
+    // Claim flow: invite-code → claim-welcome → profile-form → claim-processing → profile-confirmation → mnemonic-verification → welcome-overlay → dashboard
     const forwardMap: Record<string, string> = {
       'invite-code': 'claim-welcome',
       'claim-welcome': 'profile-form',
@@ -166,8 +180,12 @@ const handleContinue = (data?: unknown) => {
       'claim-processing': 'profile-confirmation',
       'profile-confirmation': 'mnemonic-verification',
       'mnemonic-verification': 'welcome-overlay',
-      'welcome-overlay': 'main',
     };
+    // Route directly to dashboard from welcome-overlay to avoid flash
+    if (current === 'welcome-overlay') {
+      router.push('/dashboard');
+      return;
+    }
     const next = forwardMap[current];
     if (next) {
       store.navigateTo(next as typeof store.currentScreen);
@@ -255,6 +273,22 @@ watch(
   (newScreen) => {
     if (newScreen === 'main') {
       router.push('/dashboard');
+    } else {
+      // Reset scroll position when switching screens
+      nextTick(() => {
+        // Scroll the page container
+        const pageContainer = document.querySelector('.q-page-container');
+        if (pageContainer) {
+          pageContainer.scrollTop = 0;
+        }
+        // Scroll the onboarding page
+        const onboardingPage = document.querySelector('.onboarding-page');
+        if (onboardingPage) {
+          onboardingPage.scrollTop = 0;
+        }
+        // Scroll window as fallback
+        window.scrollTo(0, 0);
+      });
     }
   },
 );

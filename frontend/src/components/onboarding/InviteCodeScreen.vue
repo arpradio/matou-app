@@ -1,18 +1,12 @@
 <template>
   <div class="invite-code-screen h-full flex flex-col bg-background">
     <!-- Header -->
-    <div class="p-6 md:p-8 pb-4 border-b border-border">
-      <div class="flex items-center justify-between mb-4">
-        <button
-          class="text-muted-foreground hover:text-foreground transition-colors"
-          @click="onBack"
-        >
-          <ArrowLeft class="w-5 h-5" />
-        </button>
-      </div>
-      <h1 class="mb-2">Welcome to Matou</h1>
-      <p class="text-muted-foreground">Enter your invite code to join the community</p>
-    </div>
+    <OnboardingHeader
+      title="Welcome to Matou"
+      subtitle="Enter your invite code to join the community"
+      :show-back-button="true"
+      @back="onBack"
+    />
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-6 md:p-8">
@@ -57,6 +51,7 @@
 import { ref } from 'vue';
 import { ArrowLeft, AlertCircle, Info } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
+import OnboardingHeader from './OnboardingHeader.vue';
 import MInput from '../base/MInput.vue';
 import { useClaimIdentity } from 'composables/useClaimIdentity';
 import { useOnboardingStore } from 'stores/onboarding';

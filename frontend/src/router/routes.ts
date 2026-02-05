@@ -34,6 +34,28 @@ const routes: RouteRecordRaw[] = [
       },
     ],
   },
+  {
+    path: '/community-guidelines',
+    component: () => import('layouts/OnboardingLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'community-guidelines',
+        component: () => import('pages/CommunityGuidelinesPage.vue'),
+      },
+    ],
+  },
+  {
+    path: '/privacy-policy',
+    component: () => import('layouts/OnboardingLayout.vue'),
+    children: [
+      {
+        path: '',
+        name: 'privacy-policy',
+        component: () => import('pages/PrivacyPolicyPage.vue'),
+      },
+    ],
+  },
   // Always leave this as last one
   {
     path: '/:catchAll(.*)*',

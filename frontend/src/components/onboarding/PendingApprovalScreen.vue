@@ -1,24 +1,11 @@
 <template>
   <div class="pending-approval-screen h-full flex flex-col bg-background">
     <!-- Header -->
-    <div
-      class="header-gradient bg-gradient-to-br from-primary via-primary/95 to-accent p-6 md:p-8 pb-12 rounded-b-3xl relative overflow-hidden"
-    >
-      <!-- Animated background circle -->
-      <div v-motion="backgroundPulse" class="bg-circle absolute top-0 right-0 w-64 h-64 bg-white rounded-full blur-3xl" />
-
-      <div class="relative z-10">
-        <div class="flex items-center gap-4 mb-6">
-          <div class="logo-box bg-white/20 backdrop-blur-sm p-3 rounded-2xl">
-            <img src="../../assets/images/matou-logo.svg" alt="Matou Logo" class="w-12 h-12" />
-          </div>
-          <div>
-            <h1 class="text-white text-2xl md:text-3xl">Registration Pending</h1>
-            <p class="text-white/80">Kia ora, {{ userName }}</p>
-          </div>
-        </div>
-      </div>
-    </div>
+    <OnboardingHeader
+      title="Registration Pending"
+      :subtitle="`Kia ora, ${userName}`"
+      :show-back-button="false"
+    />
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-6 md:p-8 -mt-6">
@@ -123,12 +110,12 @@
           </div>
 
           <!-- Reply Input -->
-          <div class="reply-section mt-4 pt-4 border-t border-border">
+          <div class="reply-section mt-4 pt-4 border-t">
             <div class="flex gap-2">
               <textarea
                 v-model="replyMessage"
                 placeholder="Type your reply..."
-                class="flex-1 p-3 text-sm border border-border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background"
+                class="flex-1 p-3 text-sm border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background"
                 rows="2"
                 :disabled="isSendingReply"
               />
@@ -265,6 +252,7 @@
 import { ref, computed, watch, onMounted } from 'vue';
 import { Clock, FileText, Users, Target, BookOpen, ExternalLink, CheckCircle, CheckCircle2, Circle, XCircle, Loader2, Copy, Check, MessageCircle } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
+import OnboardingHeader from './OnboardingHeader.vue';
 import WelcomeOverlay from './WelcomeOverlay.vue';
 import { useAnimationPresets } from 'composables/useAnimationPresets';
 import { useCredentialPolling } from 'composables/useCredentialPolling';
@@ -583,24 +571,7 @@ const resources = [
   background-color: var(--matou-background);
 }
 
-.header-gradient {
-  background: linear-gradient(
-    135deg,
-    var(--matou-primary) 0%,
-    rgba(30, 95, 116, 0.95) 50%,
-    var(--matou-accent) 100%
-  );
-}
-
-.bg-circle {
-  opacity: 0.1;
-}
-
-.logo-box {
-  img {
-    object-fit: contain;
-  }
-}
+// Header styles are now handled by OnboardingHeader component
 
 .icon-box {
   display: flex;

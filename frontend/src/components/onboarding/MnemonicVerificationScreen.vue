@@ -1,18 +1,12 @@
 <template>
   <div class="mnemonic-verification-screen h-full flex flex-col bg-background">
     <!-- Header -->
-    <div class="p-6 md:p-8 pb-4 border-b border-border">
-      <button
-        class="mb-4 text-muted-foreground hover:text-foreground transition-colors"
-        @click="onBack"
-      >
-        <ArrowLeft class="w-5 h-5" />
-      </button>
-      <h1 class="mb-2">Verify Your Recovery Phrase</h1>
-      <p class="text-muted-foreground">
-        Enter the requested words to confirm you've saved your phrase
-      </p>
-    </div>
+    <OnboardingHeader
+      title="Verify Your Recovery Phrase"
+      subtitle="Enter the requested words to confirm you've saved your phrase"
+      :show-back-button="true"
+      @back="onBack"
+    />
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-6 md:p-8">
@@ -156,6 +150,7 @@ import {
   Loader2,
 } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
+import OnboardingHeader from './OnboardingHeader.vue';
 import { useOnboardingStore } from 'stores/onboarding';
 import { useRegistration } from 'composables/useRegistration';
 
@@ -226,6 +221,11 @@ async function handleVerify() {
     // Setup path = admin already has credential issued, invite path = already invited
     if (store.onboardingPath === 'register') {
       console.log('[MnemonicVerification] Sending registration to org...');
+      console.log('[MnemonicVerification] Profile data:', {
+        name: store.profile.name,
+        avatarFileRef: store.profile.avatarFileRef,
+        hasAvatar: !!store.profile.avatarFileRef,
+      });
 
       const success = await submitRegistration({
         name: store.profile.name,
@@ -234,6 +234,8 @@ async function handleVerify() {
         interests: store.profile.participationInterests,
         customInterests: store.profile.customInterests,
         avatarFileRef: store.profile.avatarFileRef || undefined,
+        avatarData: store.profile.avatarData || undefined,
+        avatarMimeType: store.profile.avatarMimeType || undefined,
       });
 
       if (!success) {

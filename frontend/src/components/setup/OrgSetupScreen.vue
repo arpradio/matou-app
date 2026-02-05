@@ -91,9 +91,8 @@
               />
               <MBtn
                 type="button"
-                variant="outline"
                 size="sm"
-                class="text-white border-white/30 hover:bg-white/10"
+                class="text-white bg-white/20 border-white/30 hover:bg-white/30"
                 @click="fileInput?.click()"
                 :disabled="isSubmitting || isUploadingAvatar"
               >
@@ -101,14 +100,14 @@
                 <Loader2 v-else class="w-4 h-4 mr-2 animate-spin" />
                 {{ avatarPreview ? 'Change' : 'Upload' }}
               </MBtn>
-              <button
+              <MBtn
                 v-if="avatarPreview"
                 type="button"
                 class="ml-2 text-white/60 hover:text-white text-xs"
                 @click="removeAvatar"
               >
                 Remove
-              </button>
+            </MBtn>
             </div>
           </div>
         </div>
@@ -129,7 +128,7 @@
           type="submit"
           class="w-full submit-btn"
           size="lg"
-          :disabled="!isFormValid || isSubmitting"
+          :disabled="!isFormValid || isSubmitting || isUploadingAvatar"
         >
           <Rocket class="w-5 h-5 mr-2" />
           Create Organization
@@ -300,6 +299,7 @@ async function handleSubmit() {
     adminName: adminName.value.trim(),
     adminEmail: adminEmail.value.trim() || undefined,
     adminAvatar: avatarFileRef.value || undefined,
+    adminAvatarPreview: avatarPreview.value || undefined,
   });
 
   if (success) {

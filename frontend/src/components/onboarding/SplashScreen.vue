@@ -94,18 +94,61 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, watch } from 'vue';
 import { Key, UserPlus, AlertCircle, RefreshCw } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
 import { useAnimationPresets } from 'composables/useAnimationPresets';
 import { useOnboardingStore } from 'stores/onboarding';
+import { useIdentityStore } from 'stores/identity';
+import { useKERIClient } from 'src/lib/keri/client';
 
 const { fadeSlideUp, fadeScale, logoWobble } = useAnimationPresets();
 const onboardingStore = useOnboardingStore();
+const identityStore = useIdentityStore();
+const keriClient = useKERIClient();
 
 const isLoading = computed(() => onboardingStore.isLoading);
 const hasError = computed(() => !!onboardingStore.initializationError);
 const errorMessage = computed(() => onboardingStore.initializationError);
+
+// When loading finishes and user has identity, check credential and route
+watch(
+  () => onboardingStore.appState,
+  async (state) => {
+    if (state !== 'ready') return;
+    if (!identityStore.hasIdentity || !identityStore.currentAID) return;
+
+    console.log('[Splash] Identity found, checking for credential...');
+
+    try {
+      const client = keriClient.getSignifyClient();
+      if (!client) {
+        console.log('[Splash] No KERI client, routing to pending-approval');
+        onboardingStore.navigateTo('pending-approval');
+        return;
+      }
+
+      const credentials = await client.credentials().list();
+      console.log(`[Splash] Found ${credentials.length} credentials`);
+
+      if (credentials.length > 0) {
+        // Has credential - go to welcome overlay
+        console.log('[Splash] Credential found, routing to welcome-overlay');
+        onboardingStore.setPath('returning');
+        onboardingStore.navigateTo('welcome-overlay');
+      } else {
+        // No credential - go to pending approval
+        console.log('[Splash] No credential, routing to pending-approval');
+        onboardingStore.navigateTo('pending-approval');
+      }
+    } catch (err) {
+      console.error('[Splash] Error checking credentials:', err);
+      // On error, go to pending approval to poll
+      onboardingStore.navigateTo('pending-approval');
+    }
+  },
+  { immediate: true }
+);
 
 const emit = defineEmits<{
   (e: 'invite-code'): void;

@@ -5,8 +5,8 @@
       class="welcome-overlay fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm"
     >
       <div class="content flex flex-col items-center gap-6 max-w-md text-center p-8">
-        <!-- Success Icon -->
-        <div class="">
+        <!-- Logo -->
+        <div v-motion="fadeSlideUp(600)" class="">
           <img
             src="../../assets/images/matou-logo.svg"
             alt="Matou Logo"
@@ -15,17 +15,21 @@
         </div>
 
         <!-- Title -->
-        <div v-motion="fadeSlideUp(300)" class="text-center">
+        <div v-motion="fadeSlideUp(1200)" class="text-center">
           <img
             src="../../assets/images/matou-text-logo-white.svg"
             alt="Matou"
             class="matou-text-logo-white mb-2 mt-0 w-[300px] h-[100px] mx-auto"
           />
-          <p class="text-white/80 text-base md:text-lg">Welcome to Matou, {{ displayName }}!</p>
         </div>
 
+        <!-- Welcome Text - Rotating Indigenous Languages -->
+        <p v-motion="fadeSlideUp(2400)" class="text-white/80 text-base md:text-lg -mt-4">
+          <span class="welcome-word" :class="{ 'fade-out': wordFading }">{{ currentWelcome.word }}</span>, {{ displayName }}!
+        </p>
+
         <!-- Sync Progress Steps -->
-        <div v-if="!syncReady" class="sync-steps w-full">
+        <div v-if="!syncReady" v-motion="fadeSlideUp(3000)" class="sync-steps w-full">
           <div
             v-for="step in syncSteps"
             :key="step.key"
@@ -45,12 +49,13 @@
         </div>
 
         <!-- Timeout warning -->
-        <p v-if="timedOut && !syncReady" class="text-white/60 text-xs">
+        <p v-if="timedOut && !syncReady" v-motion="fadeSlideUp(3600)" class="text-white/60 text-xs">
           Sync is taking longer than expected. You can enter anyway.
         </p>
 
         <!-- Continue Button -->
         <MBtn
+          v-motion="fadeSlideUp(3600)"
           class="w-full"
           :disabled="!syncReady && !timedOut"
           @click="handleContinue"
@@ -108,6 +113,47 @@ const displayName = computed(() => {
 const emit = defineEmits<{
   (e: 'continue'): void;
 }>();
+
+// Welcome words in indigenous languages
+const welcomeWords = [
+  { word: 'Nau mai', language: 'Māori' },
+  { word: 'E komo mai', language: 'Hawaiian' },
+  { word: "Yá'át'ééh", language: 'Navajo' },
+  { word: 'Osiyo', language: 'Cherokee' },
+  { word: 'Taŋyáŋ yahí', language: 'Lakota' },
+  { word: 'Hamuykuy', language: 'Quechua' },
+  { word: 'Ximopanolti', language: 'Nahuatl' },
+  { word: 'Tunngasugit', language: 'Inuktitut' },
+  { word: 'Tereg̃uahẽ porãite', language: 'Guaraní' },
+  { word: 'Mari mari', language: 'Mapudungun' },
+];
+
+const welcomeIndex = ref(0);
+const currentWelcome = computed(() => welcomeWords[welcomeIndex.value]);
+const wordFading = ref(false);
+let welcomeTimer: ReturnType<typeof setInterval> | null = null;
+
+function startWelcomeRotation() {
+  stopWelcomeRotation();
+  welcomeIndex.value = 0;
+  welcomeTimer = setInterval(() => {
+    // Fade out
+    wordFading.value = true;
+    // Change word after fade out completes
+    setTimeout(() => {
+      welcomeIndex.value = (welcomeIndex.value + 1) % welcomeWords.length;
+      // Fade in
+      wordFading.value = false;
+    }, 400);
+  }, 3000);
+}
+
+function stopWelcomeRotation() {
+  if (welcomeTimer) {
+    clearInterval(welcomeTimer);
+    welcomeTimer = null;
+  }
+}
 
 // Sync state
 const communityReady = ref(false);
@@ -173,7 +219,7 @@ function stopPolling() {
   }
 }
 
-// Start polling when overlay becomes visible
+// Start polling and welcome rotation when overlay becomes visible
 watch(() => props.show, (shown) => {
   if (shown) {
     // Reset state
@@ -181,13 +227,19 @@ watch(() => props.show, (shown) => {
     readOnlyReady.value = false;
     timedOut.value = false;
     startSyncPolling();
+    // Start welcome rotation after the welcome text fades in (2400ms delay + some buffer)
+    setTimeout(() => {
+      startWelcomeRotation();
+    }, 2400);
   } else {
     stopPolling();
+    stopWelcomeRotation();
   }
 });
 
 onUnmounted(() => {
   stopPolling();
+  stopWelcomeRotation();
 });
 
 function handleContinue() {
@@ -234,6 +286,15 @@ function handleContinue() {
 
 .sync-steps {
   max-width: 280px;
+}
+
+.welcome-word {
+  display: inline-block;
+  transition: opacity 0.4s ease;
+}
+
+.welcome-word.fade-out {
+  opacity: 0;
 }
 
 // Transition

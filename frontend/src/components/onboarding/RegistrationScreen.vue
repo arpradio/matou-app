@@ -1,16 +1,12 @@
 <template>
   <div class="registration-screen h-full flex flex-col bg-background">
     <!-- Header -->
-    <div class="p-6 md:p-8 pb-4 border-b border-border">
-      <button
-        class="mb-4 text-muted-foreground hover:text-foreground transition-colors"
-        @click="onBack"
-      >
-        <ArrowLeft class="w-5 h-5" />
-      </button>
-      <h1 class="mb-2">Create Your Profile</h1>
-      <p class="text-muted-foreground">Set up your identity in the Matou ecosystem</p>
-    </div>
+    <OnboardingHeader
+      title="Create Your Profile"
+      subtitle="Set up your identity in the Matou ecosystem"
+      :show-back-button="true"
+      @back="onBack"
+    />
 
     <!-- Content -->
     <div class="flex-1 overflow-y-auto p-6 md:p-8">
@@ -139,6 +135,7 @@ import { ref, computed, onMounted } from 'vue';
 import { ArrowLeft, Key, Bell, Shield, Loader2, CheckCircle2, AlertCircle } from 'lucide-vue-next';
 import { useQuasar } from 'quasar';
 import MBtn from '../base/MBtn.vue';
+import OnboardingHeader from './OnboardingHeader.vue';
 import MInput from '../base/MInput.vue';
 import MToggle from '../base/MToggle.vue';
 import { useIdentityStore } from 'stores/identity';
