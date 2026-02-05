@@ -40,9 +40,7 @@ backend/server
 *.dylib
 
 # Runtime data
-backend/data/
-backend/data-test/
-backend/data-test-*/
+backend/data*/
 backend/**/data/
 
 # Test coverage

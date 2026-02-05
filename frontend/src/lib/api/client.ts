@@ -478,3 +478,42 @@ export async function sendInviteEmail(
 
   return response.json();
 }
+
+/**
+ * Booking confirmation email request
+ */
+export interface SendBookingEmailRequest {
+  email: string;
+  name: string;
+  dateTimeUTC: string; // ISO 8601 format
+  dateTimeNZT: string; // Human readable NZT time
+  dateTimeLocal: string; // Human readable local time
+}
+
+/**
+ * Booking confirmation email response
+ */
+export interface SendBookingEmailResponse {
+  success: boolean;
+  error?: string;
+}
+
+/**
+ * Send a booking confirmation email with calendar invite
+ */
+export async function sendBookingEmail(
+  request: SendBookingEmailRequest,
+): Promise<SendBookingEmailResponse> {
+  const response = await fetch(`${BACKEND_URL}/api/v1/booking/send-email`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    return { success: false, error: data?.error ?? response.statusText };
+  }
+
+  return response.json();
+}
