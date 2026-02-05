@@ -75,6 +75,13 @@ export interface ProfileData {
   name: string;
   bio: string;
   email: string;
+  location: string;
+  joinReason: string;
+  indigenousCommunity: string;
+  facebookUrl: string;
+  linkedinUrl: string;
+  twitterUrl: string;
+  instagramUrl: string;
   avatar: File | null;
   avatarPreview: string | null; // Base64 or object URL for preview
   avatarFileRef: string | null; // Content-addressed fileRef from backend upload
@@ -115,6 +122,13 @@ export const useOnboardingStore = defineStore('onboarding', () => {
     name: '',
     bio: '',
     email: '',
+    location: '',
+    joinReason: '',
+    indigenousCommunity: '',
+    facebookUrl: '',
+    linkedinUrl: '',
+    twitterUrl: '',
+    instagramUrl: '',
     avatar: null,
     avatarPreview: null,
     avatarFileRef: null,
@@ -216,6 +230,13 @@ export const useOnboardingStore = defineStore('onboarding', () => {
       name: '',
       bio: '',
       email: '',
+      location: '',
+      joinReason: '',
+      indigenousCommunity: '',
+      facebookUrl: '',
+      linkedinUrl: '',
+      twitterUrl: '',
+      instagramUrl: '',
       avatar: null,
       avatarPreview: null,
       avatarFileRef: null,

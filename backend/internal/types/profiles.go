@@ -41,9 +41,12 @@ func PrivateProfileType() *TypeDefinition {
 // Stored in the community space — owner writes, all members read.
 func SharedProfileType() *TypeDefinition {
 	maxBio := 500
+	maxJoinReason := 500
 	maxCustomInterests := 300
+	maxIndigenousCommunity := 200
 	minDisplayName := 2
 	maxDisplayName := 100
+	maxSocialLink := 500
 
 	return &TypeDefinition{
 		Name:        "SharedProfile",
@@ -60,9 +63,17 @@ func SharedProfileType() *TypeDefinition {
 				UIHints:    &UIHints{InputType: "text", Label: "Display Name", Placeholder: "Your display name", Section: "profile"}},
 			{Name: "bio", Type: "string",
 				Validation: &Validation{MaxLength: &maxBio},
-				UIHints:    &UIHints{InputType: "textarea", Label: "Bio", Placeholder: "Tell the community about yourself", Section: "profile"}},
+				UIHints:    &UIHints{InputType: "textarea", Label: "About You", Placeholder: "Tell us a bit about yourself...", Section: "profile"}},
 			{Name: "avatar", Type: "string",
 				UIHints: &UIHints{InputType: "image-upload", DisplayFormat: "avatar", Label: "Profile Photo", Section: "profile"}},
+			{Name: "location", Type: "string",
+				UIHints: &UIHints{InputType: "text", Label: "Location", Placeholder: "City, Country", Section: "profile"}},
+			{Name: "joinReason", Type: "string",
+				Validation: &Validation{MaxLength: &maxJoinReason},
+				UIHints:    &UIHints{InputType: "textarea", Label: "Why do you want to join?", Placeholder: "Share what brings you to Matou and what you hope to contribute...", Section: "profile"}},
+			{Name: "indigenousCommunity", Type: "string",
+				Validation: &Validation{MaxLength: &maxIndigenousCommunity},
+				UIHints:    &UIHints{InputType: "text", Label: "Indigenous Community", Placeholder: "Indigenous community you connect to", Section: "profile"}},
 			{Name: "participationInterests", Type: "array",
 				UIHints: &UIHints{InputType: "tags", DisplayFormat: "chip-list", Label: "Participation Interests", Section: "interests"}},
 			{Name: "customInterests", Type: "string",
@@ -76,8 +87,18 @@ func SharedProfileType() *TypeDefinition {
 				UIHints: &UIHints{InputType: "text", Label: "Public Email", Placeholder: "email@example.com", Section: "contact"}},
 			{Name: "publicLinks", Type: "array",
 				UIHints: &UIHints{InputType: "tags", DisplayFormat: "link", Label: "Public Links", Section: "contact"}},
-			{Name: "location", Type: "string",
-				UIHints: &UIHints{InputType: "text", Label: "Location", Placeholder: "City, Country", Section: "contact"}},
+			{Name: "facebookUrl", Type: "string",
+				Validation: &Validation{MaxLength: &maxSocialLink},
+				UIHints:    &UIHints{InputType: "text", Label: "Facebook", Placeholder: "https://facebook.com/username", Section: "social"}},
+			{Name: "linkedinUrl", Type: "string",
+				Validation: &Validation{MaxLength: &maxSocialLink},
+				UIHints:    &UIHints{InputType: "text", Label: "LinkedIn", Placeholder: "https://linkedin.com/in/username", Section: "social"}},
+			{Name: "twitterUrl", Type: "string",
+				Validation: &Validation{MaxLength: &maxSocialLink},
+				UIHints:    &UIHints{InputType: "text", Label: "X (Twitter)", Placeholder: "https://x.com/username", Section: "social"}},
+			{Name: "instagramUrl", Type: "string",
+				Validation: &Validation{MaxLength: &maxSocialLink},
+				UIHints:    &UIHints{InputType: "text", Label: "Instagram", Placeholder: "https://instagram.com/username", Section: "social"}},
 			{Name: "lastActiveAt", Type: "datetime", ReadOnly: true,
 				UIHints: &UIHints{DisplayFormat: "relative-date", Label: "Last Active"}},
 			{Name: "createdAt", Type: "datetime", ReadOnly: true,
@@ -88,8 +109,8 @@ func SharedProfileType() *TypeDefinition {
 		},
 		Layouts: map[string]Layout{
 			"card":   {Fields: []string{"avatar", "displayName"}},
-			"detail": {Fields: []string{"avatar", "displayName", "bio", "participationInterests", "customInterests", "skills", "languages", "publicEmail", "publicLinks", "location", "lastActiveAt", "createdAt"}},
-			"form":   {Fields: []string{"displayName", "bio", "avatar", "participationInterests", "customInterests", "skills", "languages", "publicEmail", "publicLinks", "location"}},
+			"detail": {Fields: []string{"avatar", "displayName", "bio", "location", "indigenousCommunity", "joinReason", "participationInterests", "customInterests", "skills", "languages", "publicEmail", "publicLinks", "facebookUrl", "linkedinUrl", "twitterUrl", "instagramUrl", "lastActiveAt", "createdAt"}},
+			"form":   {Fields: []string{"displayName", "bio", "avatar", "location", "indigenousCommunity", "joinReason", "participationInterests", "customInterests", "skills", "languages", "publicEmail", "publicLinks", "facebookUrl", "linkedinUrl", "twitterUrl", "instagramUrl"}},
 		},
 		Permissions: TypePermissions{
 			Read:  "community",

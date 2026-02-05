@@ -15,6 +15,13 @@ export interface RegistrationData {
   name: string;
   email?: string;
   bio: string;
+  location?: string;
+  joinReason?: string;
+  indigenousCommunity?: string;
+  facebookUrl?: string;
+  linkedinUrl?: string;
+  twitterUrl?: string;
+  instagramUrl?: string;
   interests: string[];
   customInterests?: string;
   avatarFileRef?: string;
@@ -233,7 +240,19 @@ export function useRegistration() {
    */
   async function createProfilesAfterJoin(
     credentialSAID: string,
-    registrationData?: { name?: string; bio?: string; interests?: string[]; customInterests?: string },
+    registrationData?: {
+      name?: string;
+      bio?: string;
+      location?: string;
+      joinReason?: string;
+      indigenousCommunity?: string;
+      facebookUrl?: string;
+      linkedinUrl?: string;
+      twitterUrl?: string;
+      instagramUrl?: string;
+      interests?: string[];
+      customInterests?: string;
+    },
     avatarFileRef?: string,
   ): Promise<void> {
     const currentAID = identityStore.currentAID;
@@ -258,6 +277,13 @@ export function useRegistration() {
         aid: currentAID.prefix,
         displayName: registrationData?.name || onboardingStore.profile.name || 'Member',
         bio: registrationData?.bio || onboardingStore.profile.bio || '',
+        location: registrationData?.location || onboardingStore.profile.location || '',
+        joinReason: registrationData?.joinReason || onboardingStore.profile.joinReason || '',
+        indigenousCommunity: registrationData?.indigenousCommunity || onboardingStore.profile.indigenousCommunity || '',
+        facebookUrl: registrationData?.facebookUrl || onboardingStore.profile.facebookUrl || '',
+        linkedinUrl: registrationData?.linkedinUrl || onboardingStore.profile.linkedinUrl || '',
+        twitterUrl: registrationData?.twitterUrl || onboardingStore.profile.twitterUrl || '',
+        instagramUrl: registrationData?.instagramUrl || onboardingStore.profile.instagramUrl || '',
         avatar: avatarFileRef || '',
         participationInterests: registrationData?.interests || onboardingStore.profile.participationInterests || [],
         customInterests: registrationData?.customInterests || onboardingStore.profile.customInterests || '',

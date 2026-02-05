@@ -127,16 +127,59 @@
 
         <!-- Bio -->
         <div class="space-y-2">
-          <label class="text-sm font-medium" for="bio">Why would you like to join us?</label>
+          <label class="text-sm font-medium" for="bio">Tell us a bit about yourself</label>
           <textarea
             id="bio"
             v-model="formData.bio"
             rows="3"
             class="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary resize-none"
-            placeholder="Share your background, interests, and what brings you to Matou..."
+            placeholder="Share a bit about your background, experience, and interests..."
           />
           <p class="text-xs text-muted-foreground text-right">
             {{ formData.bio.length }} / 500
+          </p>
+        </div>
+
+        <!-- Location -->
+        <div class="space-y-2">
+          <label class="text-sm font-medium" for="location">Location</label>
+          <MInput
+            id="location"
+            v-model="formData.location"
+            type="text"
+            placeholder="City, Country"
+          />
+          <p class="text-xs text-muted-foreground">
+            Where are you based?
+          </p>
+        </div>
+
+        <!-- Indigenous Community -->
+        <div class="space-y-2">
+          <label class="text-sm font-medium" for="indigenousCommunity">Indigenous Community</label>
+          <MInput
+            id="indigenousCommunity"
+            v-model="formData.indigenousCommunity"
+            type="text"
+            placeholder="e.g., Wurundjeri, Noongar, Yolngu..."
+          />
+          <p class="text-xs text-muted-foreground">
+            Optional. Indigenous community that you connect to.
+          </p>
+        </div>
+
+        <!-- Join Reason -->
+        <div class="space-y-2">
+          <label class="text-sm font-medium" for="joinReason">Why would you like to join us?</label>
+          <textarea
+            id="joinReason"
+            v-model="formData.joinReason"
+            rows="3"
+            class="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary resize-none"
+            placeholder="Share what brings you to Matou and what you hope to contribute..."
+          />
+          <p class="text-xs text-muted-foreground text-right">
+            {{ formData.joinReason.length }} / 500
           </p>
         </div>
 
@@ -183,6 +226,50 @@
           <p class="text-xs text-muted-foreground text-right">
             {{ formData.customInterests.length }} / 300
           </p>
+        </div>
+
+        <!-- Social Links -->
+        <div class="space-y-3">
+          <label class="text-sm font-medium">Social Links</label>
+          <p class="text-xs text-muted-foreground">Optional. Connect with the community on other platforms.</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div class="space-y-1">
+              <label class="text-xs text-muted-foreground" for="facebookUrl">Facebook</label>
+              <MInput
+                id="facebookUrl"
+                v-model="formData.facebookUrl"
+                type="url"
+                placeholder="https://facebook.com/username"
+              />
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs text-muted-foreground" for="linkedinUrl">LinkedIn</label>
+              <MInput
+                id="linkedinUrl"
+                v-model="formData.linkedinUrl"
+                type="url"
+                placeholder="https://linkedin.com/in/username"
+              />
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs text-muted-foreground" for="twitterUrl">X (Twitter)</label>
+              <MInput
+                id="twitterUrl"
+                v-model="formData.twitterUrl"
+                type="url"
+                placeholder="https://x.com/username"
+              />
+            </div>
+            <div class="space-y-1">
+              <label class="text-xs text-muted-foreground" for="instagramUrl">Instagram</label>
+              <MInput
+                id="instagramUrl"
+                v-model="formData.instagramUrl"
+                type="url"
+                placeholder="https://instagram.com/username"
+              />
+            </div>
+          </div>
         </div>
 
         <!-- Terms Agreement -->
@@ -264,6 +351,13 @@ const formData = ref({
   name: store.profile.name,
   email: store.profile.email,
   bio: store.profile.bio,
+  location: store.profile.location,
+  joinReason: store.profile.joinReason,
+  indigenousCommunity: store.profile.indigenousCommunity,
+  facebookUrl: store.profile.facebookUrl,
+  linkedinUrl: store.profile.linkedinUrl,
+  twitterUrl: store.profile.twitterUrl,
+  instagramUrl: store.profile.instagramUrl,
   participationInterests: [...store.profile.participationInterests] as ParticipationInterest[],
   customInterests: store.profile.customInterests,
   hasAgreedToTerms: store.profile.hasAgreedToTerms,
@@ -284,7 +378,9 @@ const canSubmit = computed(() => {
     formData.value.name.trim().length >= 2 &&
     formData.value.hasAgreedToTerms &&
     formData.value.bio.length <= 500 &&
-    formData.value.customInterests.length <= 300
+    formData.value.joinReason.length <= 500 &&
+    formData.value.customInterests.length <= 300 &&
+    formData.value.indigenousCommunity.length <= 200
   );
 });
 
@@ -400,6 +496,13 @@ async function handleSubmit() {
     name: formData.value.name.trim(),
     email: formData.value.email.trim(),
     bio: formData.value.bio.trim(),
+    location: formData.value.location.trim(),
+    joinReason: formData.value.joinReason.trim(),
+    indigenousCommunity: formData.value.indigenousCommunity.trim(),
+    facebookUrl: formData.value.facebookUrl.trim(),
+    linkedinUrl: formData.value.linkedinUrl.trim(),
+    twitterUrl: formData.value.twitterUrl.trim(),
+    instagramUrl: formData.value.instagramUrl.trim(),
     avatarPreview: avatarPreview.value,
     participationInterests: formData.value.participationInterests,
     customInterests: formData.value.customInterests.trim(),
