@@ -227,6 +227,8 @@ async function handleVerify() {
         hasAvatar: !!store.profile.avatarFileRef,
       });
 
+      // Note: avatarData/avatarMimeType are NOT included - they would exceed KERI message size limits
+      // The avatar is already uploaded to the backend; only the fileRef is sent
       const success = await submitRegistration({
         name: store.profile.name,
         email: store.profile.email || undefined,
@@ -234,8 +236,6 @@ async function handleVerify() {
         interests: store.profile.participationInterests,
         customInterests: store.profile.customInterests,
         avatarFileRef: store.profile.avatarFileRef || undefined,
-        avatarData: store.profile.avatarData || undefined,
-        avatarMimeType: store.profile.avatarMimeType || undefined,
       });
 
       if (!success) {

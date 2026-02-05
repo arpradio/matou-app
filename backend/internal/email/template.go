@@ -159,8 +159,11 @@ const bookingEmailHTML = `<!DOCTYPE html>
                     <p style="margin:0 0 8px; color:#1a1a1a; font-size:15px; line-height:1.5;">
                       <strong>Your local time:</strong> {{.DateTimeLocal}}
                     </p>
-                    <p style="margin:0; color:#1a1a1a; font-size:15px; line-height:1.5;">
+                    <p style="margin:0 0 8px; color:#1a1a1a; font-size:15px; line-height:1.5;">
                       <strong>Duration:</strong> 30 minutes
+                    </p>
+                    <p style="margin:0; color:#1a1a1a; font-size:15px; line-height:1.5;">
+                      <strong>Meeting link:</strong> <a href="https://meet.jit.si/matou-whakawhanaunga-session" style="color:#1e5f74;">https://meet.jit.si/matou-whakawhanaunga-session</a>
                     </p>
                   </td>
                 </tr>
@@ -171,14 +174,14 @@ const bookingEmailHTML = `<!DOCTYPE html>
               </p>
               <!-- Next Steps -->
               <p style="margin:20px 0 0; color:#374151; font-size:14px; line-height:1.6;">
-                We'll send you a meeting link closer to the session time. If you need to reschedule, please contact us at <a href="mailto:contact@matou.nz" style="color:#1e5f74;">contact@matou.nz</a>.
+                If you need to reschedule, please contact us at <a href="mailto:onboarding@matou.nz" style="color:#1e5f74;">onboarding@matou.nz</a>.
               </p>
             </td>
           </tr>
           <!-- Footer -->
           <tr>
             <td style="background-color:#f9fafb; padding:20px 32px; border-top:1px solid #e5e7eb; text-align:center;">
-              <p style="margin:0; color:#9ca3af; font-size:12px;">MATOU &mdash; Connection &vert; Collaboration &vert; Innovation</p>
+              <p style="margin:0; color:#9ca3af; font-size:12px;">MATOU - Connection | Collaboration | Innovation</p>
             </td>
           </tr>
         </table>

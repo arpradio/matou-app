@@ -261,7 +261,7 @@ test.describe.serial('Organization Setup', () => {
       console.log('[Test] Dashboard heading visible');
 
       // Verify sidebar branding
-      await expect(page.getByText('Matou Member')).toBeVisible({ timeout: TIMEOUT.short });
+      await expect(page.getByText('Matou Community')).toBeVisible({ timeout: TIMEOUT.short });
 
       // Verify stats cards rendered
       await expect(page.getByText('Pending Registrations')).toBeVisible({ timeout: TIMEOUT.short });

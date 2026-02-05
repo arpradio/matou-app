@@ -64,8 +64,10 @@ export class KERIClient {
   private get cesrUrl(): string {
     return getKeriaUrls().cesrUrl;
   }
-  // Docker internal URL no longer needed - KERIA resolves internally
-  private readonly dockerCesrUrl = '';
+  // Docker internal CESR URL — KERIA resolves OOBIs from inside Docker,
+  // so localhost URLs must be converted to the container hostname.
+  // Only applies when cesrUrl targets localhost (local Docker setup).
+  private readonly dockerCesrUrl = 'http://keria:3902';
 
   /**
    * Create a standalone SignifyClient for a separate KERIA agent.
@@ -409,7 +411,7 @@ export class KERIClient {
    * getOOBI() normalizes keria:3902 → localhost:4902 for browsers; this reverses it.
    */
   private toInternalOobiUrl(oobi: string): string {
-    if (this.dockerCesrUrl && this.cesrUrl) {
+    if (this.dockerCesrUrl && this.cesrUrl && this.cesrUrl.includes('localhost')) {
       return oobi.replace(this.cesrUrl, this.dockerCesrUrl);
     }
     return oobi;
@@ -1121,6 +1123,8 @@ export class KERIClient {
 
         // 1. Send custom EXN message first
         // Our KERIA patch creates pending notifications for escrowed custom EXN messages
+        // Note: avatarData/avatarMimeType are NOT included - they would exceed KERI message size limits
+        // The avatar is referenced via avatarFileRef which points to the uploaded file in the backend
         console.log(`[KERIClient] Sending registration EXN to ${admin.aid}...`);
         const payload = {
           type: 'registration',
@@ -1137,8 +1141,6 @@ export class KERIClient {
           interests: registrationData.interests,
           customInterests: registrationData.customInterests || '',
           avatarFileRef: registrationData.avatarFileRef || '',
-          avatarData: registrationData.avatarData || '',
-          avatarMimeType: registrationData.avatarMimeType || '',
           senderOOBI: registrationData.senderOOBI,
           submittedAt: new Date().toISOString(),
         };
@@ -1152,6 +1154,7 @@ export class KERIClient {
 
         // 2. Also send IPEX apply for native KERIA notification support
         // This provides a backup notification mechanism
+        // Note: avatarData/avatarMimeType excluded to stay within message size limits
         try {
           console.log(`[KERIClient] Sending IPEX apply to ${admin.aid}...`);
           const [apply, applySigs, applyEnd] = await this.client.ipex().apply({
@@ -1172,8 +1175,6 @@ export class KERIClient {
               interests: registrationData.interests,
               customInterests: registrationData.customInterests || '',
               avatarFileRef: registrationData.avatarFileRef || '',
-              avatarData: registrationData.avatarData || '',
-              avatarMimeType: registrationData.avatarMimeType || '',
               senderOOBI: registrationData.senderOOBI,
               submittedAt: new Date().toISOString(),
             },

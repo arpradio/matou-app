@@ -38,6 +38,7 @@ export const TIMEOUT = {
   short: 10_000,       // 10s - quick UI operations
   medium: 20_000,      // 20s - simple KERI operations, polling
   long: 30_000,        // 30s - credential delivery
+  registrationSubmit: 60_000, // 60s - OOBI resolution + EXN + IPEX apply to admins
   aidCreation: 90_000,  // 1.5 min - connect + OOBI resolution + witness-backed AID creation + end role
   orgSetup: 120_000,   // 2 min - full org setup
 } as const;
@@ -284,10 +285,10 @@ export async function registerUser(
   // Complete verification
   await completeMnemonicVerification(page, mnemonic, /verify and continue/i);
 
-  // Wait for pending screen
+  // Wait for pending screen (submission includes OOBI resolution + EXN + IPEX)
   await expect(
     page.getByText(/application.*review|pending|under review/i).first(),
-  ).toBeVisible({ timeout: TIMEOUT.medium });
+  ).toBeVisible({ timeout: TIMEOUT.registrationSubmit });
   console.log(`[${userName}] Registration submitted, on pending screen`);
 
   return { mnemonic };

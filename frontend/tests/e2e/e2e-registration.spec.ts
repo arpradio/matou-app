@@ -322,7 +322,7 @@ test.describe.serial('Registration Approval Flow', () => {
     setupPageLogging(userPage, 'User-Booking');
 
     const userName = `Booking_${uniqueSuffix()}`;
-    const testEmail = `test_${uniqueSuffix()}@example.com`;
+    const testEmail = 'ben@matou.nz';
 
     try {
       // 1. User registers (stays pending, on their own backend)
