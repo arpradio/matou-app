@@ -2,7 +2,7 @@
   <div class="account-settings">
     <!-- Header bar with gradient -->
     <div class="settings-header">
-      <button class="back-btn" @click="router.push({ name: 'dashboard' })">
+      <button class="back-btn" @click="goBack">
         <ArrowLeft :size="20" />
       </button>
       <div>
@@ -17,84 +17,72 @@
     <div v-else class="settings-content">
       <!-- Save feedback -->
       <p v-if="saveError" class="save-error">{{ saveError }}</p>
-      <p v-if="saveSuccess" class="save-success">Profile saved.</p>
+      <p v-if="saveSuccess" class="save-success">Saved</p>
 
       <!-- Section 1: Profile Information (SharedProfile) -->
       <section class="settings-card">
         <div class="card-header">
           <h3 class="card-title"><User :size="18" /> Profile Information</h3>
-          <button
-            v-if="!editingShared"
-            class="edit-btn"
-            @click="editingShared = true"
-          >
-            Edit
-          </button>
-          <button
-            v-else
-            class="cancel-btn"
-            @click="editingShared = false"
-          >
-            Cancel
-          </button>
         </div>
 
-        <TypedForm
-          v-if="editingShared"
-          typeName="SharedProfile"
-          layout="form"
-          :initialData="sharedProfileData"
-          @submit="handleSaveSharedProfile"
-        />
-
-        <template v-else>
-          <!-- Avatar row -->
-          <div class="avatar-row">
-            <div class="avatar-container">
-              <img
-                v-if="avatarUrl"
-                :src="avatarUrl"
-                class="avatar-img"
-                alt="Avatar"
-              />
-              <div v-else class="avatar-placeholder">
-                {{ userInitials }}
-              </div>
-              <div class="avatar-camera">
-                <Camera :size="14" />
-              </div>
+        <!-- Avatar row -->
+        <div class="avatar-row">
+          <div class="avatar-container">
+            <img
+              v-if="avatarUrl"
+              :src="avatarUrl"
+              class="avatar-img"
+              alt="Avatar"
+            />
+            <div v-else class="avatar-placeholder">
+              {{ userInitials }}
             </div>
-            <div class="avatar-info">
-              <span class="avatar-name">{{ sharedProfileData.displayName || 'Member' }}</span>
-              <span class="avatar-since">Member since {{ formatDate(memberSinceDate) }}</span>
+            <div class="avatar-camera">
+              <Camera :size="14" />
             </div>
           </div>
-
-          <!-- AID field -->
-          <div class="field-group">
-            <label class="field-label">AID (Autonomic Identifier)</label>
-            <div class="field-box aid-box">
-              <span class="aid-text">{{ aidPrefix || '—' }}</span>
-              <button class="copy-btn" @click="copyAid" :title="copied ? 'Copied!' : 'Copy AID'">
-                <Check v-if="copied" :size="14" />
-                <Copy v-else :size="14" />
-              </button>
-            </div>
+          <div class="avatar-info">
+            <span class="avatar-name">{{ sharedForm.displayName || 'Member' }}</span>
+            <span class="avatar-since">Member since {{ formatDate(memberSinceDate) }}</span>
           </div>
+        </div>
 
-          <!-- Display Name -->
-          <div class="field-group">
-            <label class="field-label">Display Name</label>
-            <div class="field-box">{{ sharedProfileData.displayName || '—' }}</div>
+        <!-- AID field (read-only) -->
+        <div class="field-group">
+          <label class="field-label">AID (Autonomic Identifier)</label>
+          <div class="field-box aid-box">
+            <span class="aid-text">{{ aidPrefix || '—' }}</span>
+            <button class="copy-btn" @click="copyAid" :title="copied ? 'Copied!' : 'Copy AID'">
+              <Check v-if="copied" :size="14" />
+              <Copy v-else :size="14" />
+            </button>
           </div>
+        </div>
 
-          <!-- Email -->
-          <div class="field-group">
-            <label class="field-label">Email</label>
-            <div class="field-box">{{ sharedProfileData.publicEmail || '—' }}</div>
-            <span class="field-helper">Visible to community members</span>
-          </div>
-        </template>
+        <!-- Display Name -->
+        <div class="field-group">
+          <label class="field-label">Display Name</label>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.displayName"
+            @blur="saveSharedDebounced"
+            placeholder="Your display name"
+          />
+        </div>
+
+        <!-- Email -->
+        <div class="field-group">
+          <label class="field-label">Email</label>
+          <input
+            type="email"
+            class="field-input"
+            v-model="sharedForm.publicEmail"
+            @blur="saveSharedDebounced"
+            placeholder="Your public email"
+          />
+          <span class="field-helper">Visible to community members</span>
+        </div>
       </section>
 
       <!-- Section 2: About -->
@@ -105,22 +93,46 @@
 
         <div class="field-group">
           <label class="field-label">Bio</label>
-          <div class="field-box">{{ sharedProfileData.bio || '—' }}</div>
+          <textarea
+            class="field-input"
+            v-model="sharedForm.bio"
+            @blur="saveSharedDebounced"
+            placeholder="Tell us about yourself"
+            rows="3"
+          ></textarea>
         </div>
 
         <div class="field-group">
           <label class="field-label">Location</label>
-          <div class="field-box">{{ sharedProfileData.location || '—' }}</div>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.location"
+            @blur="saveSharedDebounced"
+            placeholder="Your location"
+          />
         </div>
 
         <div class="field-group">
           <label class="field-label">Indigenous Community</label>
-          <div class="field-box">{{ sharedProfileData.indigenousCommunity || '—' }}</div>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.indigenousCommunity"
+            @blur="saveSharedDebounced"
+            placeholder="Your community"
+          />
         </div>
 
         <div class="field-group">
           <label class="field-label">Reason for Joining</label>
-          <div class="field-box">{{ sharedProfileData.joinReason || '—' }}</div>
+          <textarea
+            class="field-input"
+            v-model="sharedForm.joinReason"
+            @blur="saveSharedDebounced"
+            placeholder="Why you joined"
+            rows="2"
+          ></textarea>
         </div>
       </section>
 
@@ -132,43 +144,49 @@
 
         <div class="field-group">
           <label class="field-label">Participation Interests</label>
-          <div class="field-box chips-box" v-if="asArray(sharedProfileData.participationInterests).length">
-            <span
-              v-for="item in asArray(sharedProfileData.participationInterests)"
-              :key="item"
-              class="chip"
-            >{{ item }}</span>
-          </div>
-          <div class="field-box" v-else>—</div>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.participationInterests"
+            @blur="saveSharedDebounced"
+            placeholder="e.g. Governance, Events, Education"
+          />
+          <span class="field-helper">Separate with commas</span>
         </div>
 
         <div class="field-group">
           <label class="field-label">Custom Interests</label>
-          <div class="field-box">{{ sharedProfileData.customInterests || '—' }}</div>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.customInterests"
+            @blur="saveSharedDebounced"
+            placeholder="Other interests"
+          />
         </div>
 
         <div class="field-group">
           <label class="field-label">Skills</label>
-          <div class="field-box chips-box" v-if="asArray(sharedProfileData.skills).length">
-            <span
-              v-for="item in asArray(sharedProfileData.skills)"
-              :key="item"
-              class="chip"
-            >{{ item }}</span>
-          </div>
-          <div class="field-box" v-else>—</div>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.skills"
+            @blur="saveSharedDebounced"
+            placeholder="e.g. Design, Development, Writing"
+          />
+          <span class="field-helper">Separate with commas</span>
         </div>
 
         <div class="field-group">
           <label class="field-label">Languages</label>
-          <div class="field-box chips-box" v-if="asArray(sharedProfileData.languages).length">
-            <span
-              v-for="item in asArray(sharedProfileData.languages)"
-              :key="item"
-              class="chip"
-            >{{ item }}</span>
-          </div>
-          <div class="field-box" v-else>—</div>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.languages"
+            @blur="saveSharedDebounced"
+            placeholder="e.g. English, Te Reo Māori"
+          />
+          <span class="field-helper">Separate with commas</span>
         </div>
       </section>
 
@@ -179,43 +197,59 @@
         </div>
 
         <div class="field-group">
-          <label class="field-label">Public Email</label>
-          <div class="field-box">{{ sharedProfileData.publicEmail || '—' }}</div>
-        </div>
-
-        <div class="field-group">
           <label class="field-label">Public Links</label>
-          <div class="field-box chips-box" v-if="asArray(sharedProfileData.publicLinks).length">
-            <a
-              v-for="link in asArray(sharedProfileData.publicLinks)"
-              :key="link"
-              :href="link"
-              target="_blank"
-              rel="noopener noreferrer"
-              class="chip link-chip"
-            >{{ link }}</a>
-          </div>
-          <div class="field-box" v-else>—</div>
+          <input
+            type="text"
+            class="field-input"
+            v-model="sharedForm.publicLinks"
+            @blur="saveSharedDebounced"
+            placeholder="e.g. https://example.com, https://blog.example.com"
+          />
+          <span class="field-helper">Separate with commas</span>
         </div>
 
         <div class="field-group">
           <label class="field-label">Facebook</label>
-          <div class="field-box">{{ sharedProfileData.facebookUrl || '—' }}</div>
+          <input
+            type="url"
+            class="field-input"
+            v-model="sharedForm.facebookUrl"
+            @blur="saveSharedDebounced"
+            placeholder="Facebook profile URL"
+          />
         </div>
 
         <div class="field-group">
           <label class="field-label">LinkedIn</label>
-          <div class="field-box">{{ sharedProfileData.linkedinUrl || '—' }}</div>
+          <input
+            type="url"
+            class="field-input"
+            v-model="sharedForm.linkedinUrl"
+            @blur="saveSharedDebounced"
+            placeholder="LinkedIn profile URL"
+          />
         </div>
 
         <div class="field-group">
           <label class="field-label">Twitter / X</label>
-          <div class="field-box">{{ sharedProfileData.twitterUrl || '—' }}</div>
+          <input
+            type="url"
+            class="field-input"
+            v-model="sharedForm.twitterUrl"
+            @blur="saveSharedDebounced"
+            placeholder="Twitter profile URL"
+          />
         </div>
 
         <div class="field-group">
           <label class="field-label">Instagram</label>
-          <div class="field-box">{{ sharedProfileData.instagramUrl || '—' }}</div>
+          <input
+            type="url"
+            class="field-input"
+            v-model="sharedForm.instagramUrl"
+            @blur="saveSharedDebounced"
+            placeholder="Instagram profile URL"
+          />
         </div>
       </section>
 
@@ -264,48 +298,36 @@
       <section class="settings-card">
         <div class="card-header">
           <h3 class="card-title"><Settings :size="18" /> Preferences</h3>
-          <button
-            v-if="!editingPrivate"
-            class="edit-btn"
-            @click="editingPrivate = true"
-          >
-            Edit
-          </button>
-          <button
-            v-else
-            class="cancel-btn"
-            @click="editingPrivate = false"
-          >
-            Cancel
-          </button>
         </div>
 
-        <TypedForm
-          v-if="editingPrivate"
-          typeName="PrivateProfile"
-          layout="form"
-          :initialData="privateProfileData"
-          @submit="handleSavePrivateProfile"
-        />
+        <div class="field-group">
+          <label class="field-label">Privacy Settings</label>
+          <textarea
+            class="field-input"
+            v-model="privateForm.privacySettings"
+            @blur="savePrivateDebounced"
+            rows="3"
+            placeholder="{}"
+          ></textarea>
+        </div>
 
-        <template v-else>
-          <div class="field-group">
-            <label class="field-label">Privacy Settings</label>
-            <div class="field-box">{{ formatObject(privateProfileData.privacySettings) }}</div>
-          </div>
-
-          <div class="field-group">
-            <label class="field-label">App Preferences</label>
-            <div class="field-box">{{ formatObject(privateProfileData.appPreferences) }}</div>
-          </div>
-        </template>
+        <div class="field-group">
+          <label class="field-label">App Preferences</label>
+          <textarea
+            class="field-input"
+            v-model="privateForm.appPreferences"
+            @blur="savePrivateDebounced"
+            rows="3"
+            placeholder="{}"
+          ></textarea>
+        </div>
       </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
+import { ref, reactive, computed, onMounted } from 'vue';
 import {
   ArrowLeft,
   User,
@@ -323,7 +345,6 @@ import { useProfilesStore } from 'stores/profiles';
 import { useTypesStore } from 'stores/types';
 import { useIdentityStore } from 'stores/identity';
 import { getFileUrl } from 'src/lib/api/client';
-import TypedForm from 'src/components/profiles/TypedForm.vue';
 
 const router = useRouter();
 const profilesStore = useProfilesStore();
@@ -331,13 +352,38 @@ const typesStore = useTypesStore();
 const identityStore = useIdentityStore();
 
 const loading = ref(true);
-const editingShared = ref(false);
-const editingPrivate = ref(false);
 const saveError = ref('');
 const saveSuccess = ref(false);
 const copied = ref(false);
 
 const aidPrefix = computed(() => identityStore.aidPrefix);
+
+// --- Local form state ---
+
+const sharedForm = reactive({
+  displayName: '',
+  publicEmail: '',
+  bio: '',
+  location: '',
+  indigenousCommunity: '',
+  joinReason: '',
+  participationInterests: '',
+  customInterests: '',
+  skills: '',
+  languages: '',
+  publicLinks: '',
+  facebookUrl: '',
+  linkedinUrl: '',
+  twitterUrl: '',
+  instagramUrl: '',
+});
+
+const privateForm = reactive({
+  privacySettings: '',
+  appPreferences: '',
+});
+
+// --- Store computeds (read-only) ---
 
 const sharedProfileData = computed(() => {
   const p = profilesStore.getMyProfile('SharedProfile');
@@ -360,7 +406,7 @@ const avatarUrl = computed(() => {
 });
 
 const userInitials = computed(() => {
-  const name = (sharedProfileData.value.displayName as string) || 'M';
+  const name = sharedForm.displayName || 'M';
   const parts = name.split(' ');
   if (parts.length >= 2) {
     return `${parts[0].charAt(0)}${parts[1].charAt(0)}`.toUpperCase();
@@ -374,6 +420,125 @@ const memberSinceDate = computed(() => {
   }
   return sharedProfileData.value.createdAt as string || '';
 });
+
+// --- Init helpers ---
+
+const arrayFields = ['participationInterests', 'skills', 'languages', 'publicLinks'] as const;
+
+function initSharedForm() {
+  const d = sharedProfileData.value;
+  sharedForm.displayName = (d.displayName as string) || '';
+  sharedForm.publicEmail = (d.publicEmail as string) || '';
+  sharedForm.bio = (d.bio as string) || '';
+  sharedForm.location = (d.location as string) || '';
+  sharedForm.indigenousCommunity = (d.indigenousCommunity as string) || '';
+  sharedForm.joinReason = (d.joinReason as string) || '';
+  sharedForm.customInterests = (d.customInterests as string) || '';
+  sharedForm.facebookUrl = (d.facebookUrl as string) || '';
+  sharedForm.linkedinUrl = (d.linkedinUrl as string) || '';
+  sharedForm.twitterUrl = (d.twitterUrl as string) || '';
+  sharedForm.instagramUrl = (d.instagramUrl as string) || '';
+  // Arrays → comma-separated strings
+  for (const field of arrayFields) {
+    sharedForm[field] = asArray(d[field]).join(', ');
+  }
+}
+
+function initPrivateForm() {
+  const d = privateProfileData.value;
+  privateForm.privacySettings = formatObject(d.privacySettings);
+  privateForm.appPreferences = formatObject(d.appPreferences);
+}
+
+// --- Save helpers ---
+
+function buildSharedData(): Record<string, unknown> {
+  // Start with existing store data to preserve fields we don't edit (e.g. avatar)
+  const data: Record<string, unknown> = { ...sharedProfileData.value };
+  // Overlay editable text fields
+  data.displayName = sharedForm.displayName;
+  data.publicEmail = sharedForm.publicEmail;
+  data.bio = sharedForm.bio;
+  data.location = sharedForm.location;
+  data.indigenousCommunity = sharedForm.indigenousCommunity;
+  data.joinReason = sharedForm.joinReason;
+  data.customInterests = sharedForm.customInterests;
+  data.facebookUrl = sharedForm.facebookUrl;
+  data.linkedinUrl = sharedForm.linkedinUrl;
+  data.twitterUrl = sharedForm.twitterUrl;
+  data.instagramUrl = sharedForm.instagramUrl;
+  // Convert comma-separated strings back to arrays
+  for (const field of arrayFields) {
+    const val = sharedForm[field];
+    data[field] = val ? val.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+  }
+  return data;
+}
+
+function buildPrivateData(): Record<string, unknown> {
+  const data: Record<string, unknown> = { ...privateProfileData.value };
+  try {
+    data.privacySettings = privateForm.privacySettings ? JSON.parse(privateForm.privacySettings) : {};
+  } catch { /* keep existing */ }
+  try {
+    data.appPreferences = privateForm.appPreferences ? JSON.parse(privateForm.appPreferences) : {};
+  } catch { /* keep existing */ }
+  return data;
+}
+
+let sharedSaveTimer: ReturnType<typeof setTimeout> | null = null;
+let privateSaveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function saveSharedDebounced() {
+  if (sharedSaveTimer) clearTimeout(sharedSaveTimer);
+  sharedSaveTimer = setTimeout(saveSharedProfile, 400);
+}
+
+function savePrivateDebounced() {
+  if (privateSaveTimer) clearTimeout(privateSaveTimer);
+  privateSaveTimer = setTimeout(savePrivateProfile, 400);
+}
+
+async function saveSharedProfile() {
+  saveError.value = '';
+  const data = buildSharedData();
+  const existing = profilesStore.getMyProfile('SharedProfile');
+  const result = await profilesStore.saveProfile('SharedProfile', data, {
+    id: existing?.id,
+  });
+  if (result.success) {
+    saveSuccess.value = true;
+    setTimeout(() => { saveSuccess.value = false; }, 2000);
+    initSharedForm();
+  } else {
+    saveError.value = result.error || 'Failed to save profile';
+  }
+}
+
+async function savePrivateProfile() {
+  saveError.value = '';
+  const data = buildPrivateData();
+  const existing = profilesStore.getMyProfile('PrivateProfile');
+  const result = await profilesStore.saveProfile('PrivateProfile', data, {
+    id: existing?.id,
+  });
+  if (result.success) {
+    saveSuccess.value = true;
+    setTimeout(() => { saveSuccess.value = false; }, 2000);
+    initPrivateForm();
+  } else {
+    saveError.value = result.error || 'Failed to save profile';
+  }
+}
+
+function goBack() {
+  // Flush any pending saves
+  if (sharedSaveTimer) { clearTimeout(sharedSaveTimer); saveSharedProfile(); }
+  if (privateSaveTimer) { clearTimeout(privateSaveTimer); savePrivateProfile(); }
+  router.push({ name: 'dashboard' });
+}
+
+// --- Utilities ---
 
 function formatDate(dateStr: string | undefined): string {
   if (!dateStr) return '—';
@@ -392,7 +557,7 @@ function asArray(val: unknown): string[] {
 }
 
 function formatObject(val: unknown): string {
-  if (!val || (typeof val === 'object' && Object.keys(val as object).length === 0)) return '—';
+  if (!val || (typeof val === 'object' && Object.keys(val as object).length === 0)) return '';
   if (typeof val === 'string') return val;
   return JSON.stringify(val, null, 2);
 }
@@ -404,7 +569,6 @@ async function copyAid() {
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 2000);
   } catch {
-    // Fallback for non-HTTPS contexts
     const ta = document.createElement('textarea');
     ta.value = aidPrefix.value;
     document.body.appendChild(ta);
@@ -416,46 +580,17 @@ async function copyAid() {
   }
 }
 
-async function handleSaveSharedProfile(data: Record<string, unknown>) {
-  saveError.value = '';
-  saveSuccess.value = false;
-  const existing = profilesStore.getMyProfile('SharedProfile');
-  const result = await profilesStore.saveProfile('SharedProfile', data, {
-    id: existing?.id,
-  });
-  if (result.success) {
-    editingShared.value = false;
-    saveSuccess.value = true;
-    setTimeout(() => { saveSuccess.value = false; }, 3000);
-  } else {
-    saveError.value = result.error || 'Failed to save profile';
-  }
-}
-
-async function handleSavePrivateProfile(data: Record<string, unknown>) {
-  saveError.value = '';
-  saveSuccess.value = false;
-  const existing = profilesStore.getMyProfile('PrivateProfile');
-  const result = await profilesStore.saveProfile('PrivateProfile', data, {
-    id: existing?.id,
-  });
-  if (result.success) {
-    editingPrivate.value = false;
-    saveSuccess.value = true;
-    setTimeout(() => { saveSuccess.value = false; }, 3000);
-  } else {
-    saveError.value = result.error || 'Failed to save profile';
-  }
-}
+// --- Lifecycle ---
 
 onMounted(async () => {
   if (!typesStore.loaded) {
     await typesStore.loadDefinitions();
   }
   await profilesStore.loadMyProfiles();
+  initSharedForm();
+  initPrivateForm();
   loading.value = false;
 
-  // Log each profile object for debugging
   const shared = profilesStore.getMyProfile('SharedProfile');
   console.log('[AccountSettings] SharedProfile:', {
     id: shared?.id, data: shared?.data, space: 'community',
@@ -526,7 +661,8 @@ onMounted(async () => {
 }
 
 .settings-content {
-  max-width: 720px;
+  width: 720px;
+  max-width: 100%;
   margin: 0 auto;
   padding: 1.5rem;
 }
@@ -540,9 +676,6 @@ onMounted(async () => {
 }
 
 .card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
   margin-bottom: 1.25rem;
 }
 
@@ -554,23 +687,6 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-}
-
-.edit-btn,
-.cancel-btn {
-  padding: 0.375rem 1rem;
-  border: 1px solid var(--matou-border, #d1d5db);
-  border-radius: 0.375rem;
-  background: var(--matou-card, #fff);
-  font-size: 0.8rem;
-  cursor: pointer;
-  color: var(--matou-foreground, #1f2937);
-  transition: background 0.15s ease;
-}
-
-.edit-btn:hover,
-.cancel-btn:hover {
-  background: var(--matou-secondary, #f3f4f6);
 }
 
 /* Avatar row */
@@ -659,6 +775,7 @@ onMounted(async () => {
   letter-spacing: 0.025em;
 }
 
+/* Read-only field display */
 .field-box {
   background: #f0f9fa;
   border: 1px solid #d1e7ea;
@@ -668,6 +785,39 @@ onMounted(async () => {
   color: var(--matou-foreground, #1f2937);
   word-break: break-word;
   white-space: pre-wrap;
+}
+
+/* Editable field input — looks like field-box but interactive */
+.field-input {
+  background: #f0f9fa;
+  border: 1px solid #d1e7ea;
+  border-radius: 0.5rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  color: var(--matou-foreground, #1f2937);
+  width: 100%;
+  font-family: inherit;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  box-sizing: border-box;
+}
+
+.field-input:hover {
+  border-color: #a8d4da;
+}
+
+.field-input:focus {
+  border-color: #1a4f5e;
+  box-shadow: 0 0 0 2px rgba(26, 79, 94, 0.1);
+}
+
+.field-input::placeholder {
+  color: #9ca3af;
+}
+
+textarea.field-input {
+  resize: vertical;
+  min-height: 60px;
 }
 
 .field-helper {
@@ -711,7 +861,7 @@ onMounted(async () => {
   background: rgba(26, 79, 94, 0.1);
 }
 
-/* Chips */
+/* Chips (read-only sections) */
 .chips-box {
   display: flex;
   flex-wrap: wrap;
@@ -726,15 +876,6 @@ onMounted(async () => {
   border-radius: 999px;
   font-size: 0.8rem;
   font-weight: 500;
-}
-
-.link-chip {
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.link-chip:hover {
-  background: #b2dfdb;
 }
 
 /* Role badge */
