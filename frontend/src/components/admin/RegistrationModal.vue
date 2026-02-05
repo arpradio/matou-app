@@ -136,17 +136,6 @@
               </div>
             </div>
 
-            <!-- Message Section -->
-            <div v-if="showMessageInput" class="mb-6">
-              <h5 class="text-sm font-medium text-muted-foreground mb-2">Send Message</h5>
-              <textarea
-                v-model="messageText"
-                class="w-full p-3 border border-border rounded-lg bg-background text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-primary/50"
-                rows="3"
-                placeholder="Type your message to the applicant..."
-              />
-            </div>
-
             <!-- Decline Reason -->
             <div v-if="showDeclineReason" class="mb-6">
               <h5 class="text-sm font-medium text-muted-foreground mb-2">Reason for Decline (optional)</h5>
@@ -166,15 +155,7 @@
 
           <!-- Footer Actions -->
           <div class="modal-footer p-4 border-t border-border">
-            <div v-if="!showMessageInput && !showDeclineReason" class="flex items-center gap-3">
-              <button
-                @click="showMessageInput = true"
-                class="flex-1 px-4 py-2.5 text-sm rounded-lg border border-border hover:bg-secondary transition-colors"
-                :disabled="isProcessing"
-              >
-                <MessageSquare class="w-4 h-4 inline mr-2" />
-                Message
-              </button>
+            <div v-if="!showDeclineReason" class="flex items-center gap-3">
               <button
                 @click="handleApprove"
                 class="flex-1 px-4 py-2.5 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
@@ -194,28 +175,8 @@
               </button>
             </div>
 
-            <!-- Message Actions -->
-            <div v-else-if="showMessageInput" class="flex items-center gap-3">
-              <button
-                @click="showMessageInput = false; messageText = ''"
-                class="flex-1 px-4 py-2.5 text-sm rounded-lg border border-border hover:bg-secondary transition-colors"
-                :disabled="isProcessing"
-              >
-                Cancel
-              </button>
-              <button
-                @click="handleSendMessage"
-                class="flex-1 px-4 py-2.5 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
-                :disabled="isProcessing || !messageText.trim()"
-              >
-                <Loader2 v-if="isProcessing && action === 'message'" class="w-4 h-4 inline mr-2 animate-spin" />
-                <Send v-else class="w-4 h-4 inline mr-2" />
-                Send Message
-              </button>
-            </div>
-
             <!-- Decline Actions -->
-            <div v-else-if="showDeclineReason" class="flex items-center gap-3">
+            <div v-else class="flex items-center gap-3">
               <button
                 @click="showDeclineReason = false; declineReason = ''"
                 class="flex-1 px-4 py-2.5 text-sm rounded-lg border border-border hover:bg-secondary transition-colors"
@@ -242,7 +203,7 @@
 
 <script setup lang="ts">
 import { ref, computed, watch } from 'vue';
-import { X, Check, Copy, MessageSquare, Send, Loader2 } from 'lucide-vue-next';
+import { X, Check, Copy, Loader2 } from 'lucide-vue-next';
 import type { PendingRegistration } from 'src/composables/useRegistrationPolling';
 import { getFileUrl } from 'src/lib/api/client';
 import { PARTICIPATION_INTERESTS } from 'stores/onboarding';
@@ -272,23 +233,18 @@ const emit = defineEmits<{
   (e: 'close'): void;
   (e: 'approve', registration: PendingRegistration): void;
   (e: 'decline', registration: PendingRegistration, reason?: string): void;
-  (e: 'message', registration: PendingRegistration, message: string): void;
 }>();
 
 // Local state
-const showMessageInput = ref(false);
 const showDeclineReason = ref(false);
-const messageText = ref('');
 const declineReason = ref('');
 const copied = ref(false);
-const action = ref<'approve' | 'decline' | 'message' | null>(null);
+const action = ref<'approve' | 'decline' | null>(null);
 
 // Reset state when modal closes
 watch(() => props.show, (isOpen) => {
   if (!isOpen) {
-    showMessageInput.value = false;
     showDeclineReason.value = false;
-    messageText.value = '';
     declineReason.value = '';
     action.value = null;
   }
@@ -378,13 +334,6 @@ function handleDecline() {
   if (props.registration) {
     action.value = 'decline';
     emit('decline', props.registration, declineReason.value || undefined);
-  }
-}
-
-function handleSendMessage() {
-  if (props.registration && messageText.value.trim()) {
-    action.value = 'message';
-    emit('message', props.registration, messageText.value.trim());
   }
 }
 </script>

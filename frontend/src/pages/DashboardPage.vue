@@ -138,7 +138,6 @@
           :action-error="actionError"
           @approve="handleApprove"
           @decline="handleDecline"
-          @message="handleMessage"
           @refresh="handleRefresh"
           @retry="retryPolling"
         />
@@ -265,7 +264,6 @@ const {
   error: actionError,
   approveRegistration,
   declineRegistration,
-  sendMessageToApplicant,
   clearError,
 } = useAdminActions();
 
@@ -459,14 +457,6 @@ async function handleDecline(registration: PendingRegistration, reason?: string)
   if (success) {
     removeRegistration(registration.notificationId);
     adminSectionRef.value?.showSuccess(`Declined ${registration.profile.name}`);
-  }
-}
-
-async function handleMessage(registration: PendingRegistration, message: string) {
-  clearError();
-  const success = await sendMessageToApplicant(registration, message);
-  if (success) {
-    adminSectionRef.value?.showSuccess(`Message sent to ${registration.profile.name}`);
   }
 }
 

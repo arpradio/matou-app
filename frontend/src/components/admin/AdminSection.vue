@@ -60,7 +60,6 @@
         :disabled="isProcessing"
         @approve="handleApprove"
         @decline="handleDecline"
-        @message="openMessageModal"
         @view="openViewModal"
       />
     </div>
@@ -74,7 +73,6 @@
       @close="closeModal"
       @approve="handleApprove"
       @decline="handleDecline"
-      @message="handleMessage"
     />
 
     <!-- Success Toast -->
@@ -114,7 +112,6 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (e: 'approve', registration: PendingRegistration): void;
   (e: 'decline', registration: PendingRegistration, reason?: string): void;
-  (e: 'message', registration: PendingRegistration, message: string): void;
   (e: 'refresh'): void;
   (e: 'retry'): void;
 }>();
@@ -133,12 +130,6 @@ function openViewModal(registration: PendingRegistration) {
   showModal.value = true;
 }
 
-// Open modal for message (same as view but could have different state)
-function openMessageModal(registration: PendingRegistration) {
-  selectedRegistration.value = registration;
-  showModal.value = true;
-}
-
 // Close modal
 function closeModal() {
   showModal.value = false;
@@ -153,11 +144,6 @@ function handleApprove(registration: PendingRegistration) {
 // Handle decline
 function handleDecline(registration: PendingRegistration, reason?: string) {
   emit('decline', registration, reason);
-}
-
-// Handle message
-function handleMessage(registration: PendingRegistration, message: string) {
-  emit('message', registration, message);
 }
 
 // Show success toast

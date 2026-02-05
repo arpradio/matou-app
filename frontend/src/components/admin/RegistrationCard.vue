@@ -52,14 +52,6 @@
     <!-- Actions -->
     <div class="flex items-center gap-2" @click.stop>
       <button
-        @click="$emit('message', registration)"
-        class="action-btn flex-1 px-3 py-2 text-sm rounded-lg border border-border hover:bg-secondary transition-colors"
-        :disabled="disabled"
-      >
-        <MessageSquare class="w-4 h-4 inline mr-1.5" />
-        Message
-      </button>
-      <button
         @click="$emit('approve', registration)"
         class="action-btn flex-1 px-3 py-2 text-sm rounded-lg bg-primary text-white hover:bg-primary/90 transition-colors"
         :disabled="disabled"
@@ -80,7 +72,7 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-import { MessageSquare, Check, X } from 'lucide-vue-next';
+import { Check, X } from 'lucide-vue-next';
 import type { PendingRegistration } from 'src/composables/useRegistrationPolling';
 import { getFileUrl } from 'src/lib/api/client';
 import { PARTICIPATION_INTERESTS } from 'stores/onboarding';
@@ -106,7 +98,6 @@ const props = withDefaults(defineProps<Props>(), {
 defineEmits<{
   (e: 'approve', registration: PendingRegistration): void;
   (e: 'decline', registration: PendingRegistration): void;
-  (e: 'message', registration: PendingRegistration): void;
   (e: 'view', registration: PendingRegistration): void;
 }>();
 

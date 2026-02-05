@@ -86,54 +86,6 @@
           </div>
         </div>
 
-        <!-- Admin Messages -->
-        <div
-          v-if="adminMessages.length > 0"
-          v-motion="fadeSlideUp(125)"
-          class="messages-card bg-card border border-border rounded-2xl p-4 shadow-sm"
-        >
-          <div class="flex items-center gap-2 mb-4">
-            <MessageCircle class="w-5 h-5 text-primary" />
-            <h3 class="font-medium">Messages from Admin</h3>
-          </div>
-          <div class="space-y-3">
-            <div
-              v-for="message in adminMessages"
-              :key="message.id"
-              class="message-bubble bg-secondary/50 rounded-xl p-3"
-            >
-              <p class="text-foreground text-sm">{{ message.content }}</p>
-              <span class="text-xs text-muted-foreground mt-1 block">
-                {{ formatMessageTime(message.sentAt) }}
-              </span>
-            </div>
-          </div>
-
-          <!-- Reply Input -->
-          <div class="reply-section mt-4 pt-4 border-t">
-            <div class="flex gap-2">
-              <textarea
-                v-model="replyMessage"
-                placeholder="Type your reply..."
-                class="flex-1 p-3 text-sm border rounded-xl resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 bg-background"
-                rows="2"
-                :disabled="isSendingReply"
-              />
-              <MBtn
-                variant="primary"
-                size="sm"
-                class="self-end"
-                :disabled="!replyMessage.trim() || isSendingReply"
-                @click="sendReply"
-              >
-                <span v-if="isSendingReply">Sending...</span>
-                <span v-else>Send</span>
-              </MBtn>
-            </div>
-            <p v-if="replyError" class="text-xs text-destructive mt-2">{{ replyError }}</p>
-          </div>
-        </div>
-
         <!-- Rejection Info (when rejected) -->
         <div
           v-if="currentStatus === 'rejected'"
@@ -250,18 +202,16 @@
 
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from 'vue';
-import { Clock, FileText, Users, Target, BookOpen, ExternalLink, CheckCircle, CheckCircle2, Circle, XCircle, Loader2, Copy, Check, MessageCircle } from 'lucide-vue-next';
+import { Clock, FileText, Users, Target, BookOpen, ExternalLink, CheckCircle, CheckCircle2, Circle, XCircle, Loader2, Copy, Check } from 'lucide-vue-next';
 import MBtn from '../base/MBtn.vue';
 import OnboardingHeader from './OnboardingHeader.vue';
 import WelcomeOverlay from './WelcomeOverlay.vue';
 import { useAnimationPresets } from 'composables/useAnimationPresets';
 import { useCredentialPolling } from 'composables/useCredentialPolling';
-import { useRegistration } from 'composables/useRegistration';
 import { useIdentityStore } from 'stores/identity';
 
 const { fadeSlideUp, slideInLeft, rotate, backgroundPulse, progressBar } = useAnimationPresets();
 const identityStore = useIdentityStore();
-const { sendMessageToAdmin } = useRegistration();
 
 // User's AID for display
 const userAID = computed(() => identityStore.currentAID?.prefix ?? 'Loading...');
@@ -273,20 +223,6 @@ function copyAID() {
     copied.value = true;
     setTimeout(() => { copied.value = false; }, 2000);
   }
-}
-
-// Format message time
-function formatMessageTime(dateStr: string): string {
-  const date = new Date(dateStr);
-  const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffMins = Math.floor(diffMs / 60000);
-  const diffHours = Math.floor(diffMins / 60);
-
-  if (diffMins < 1) return 'Just now';
-  if (diffMins < 60) return `${diffMins} min ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 }
 
 interface Props {
@@ -316,52 +252,12 @@ const {
   readOnlySpaceId,
   rejectionReceived,
   rejectionInfo,
-  adminMessages,
   startPolling,
   retry,
 } = useCredentialPolling({ pollingInterval: 5000 });
 
 // UI State
 const showWelcome = ref(false);
-
-// Reply state
-const replyMessage = ref('');
-const isSendingReply = ref(false);
-const replyError = ref<string | null>(null);
-
-// Send reply to admin
-async function sendReply() {
-  if (!replyMessage.value.trim()) return;
-
-  // Get the admin AID from the most recent message
-  const lastMessage = adminMessages.value[adminMessages.value.length - 1];
-  if (!lastMessage?.senderAid) {
-    replyError.value = 'Cannot determine admin to reply to';
-    return;
-  }
-
-  isSendingReply.value = true;
-  replyError.value = null;
-
-  // Include the message being replied to for threading
-  const success = await sendMessageToAdmin(
-    replyMessage.value.trim(),
-    lastMessage.senderAid,
-    {
-      id: lastMessage.id,
-      content: lastMessage.content,
-      sentAt: lastMessage.sentAt,
-    }
-  );
-
-  if (success) {
-    replyMessage.value = '';
-  } else {
-    replyError.value = 'Failed to send reply. Please try again.';
-  }
-
-  isSendingReply.value = false;
-}
 
 // Computed status for display
 const currentStatus = computed(() => {
@@ -617,20 +513,6 @@ const resources = [
 
 .aid-card {
   background-color: var(--matou-card);
-}
-
-.messages-card {
-  background-color: var(--matou-card);
-}
-
-.message-bubble {
-  background-color: rgba(232, 244, 248, 0.5);
-}
-
-.reply-section {
-  textarea {
-    background-color: var(--matou-background);
-  }
 }
 
 .rejection-card {
