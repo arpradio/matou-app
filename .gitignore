@@ -6,6 +6,9 @@ backend/config/.org-passcode
 backend/config/.keria-config.json
 backend/config/secrets.yaml
 
+# Any-sync client config (fetched from config server at runtime)
+backend/config/client-*.yml
+
 # ============================================================================
 # Development
 # ============================================================================
