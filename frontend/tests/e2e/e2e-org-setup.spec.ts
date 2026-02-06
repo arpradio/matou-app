@@ -148,16 +148,17 @@ test.describe.serial('Organization Setup', () => {
       await page.getByRole('button', { name: /continue/i }).click();
       await completeMnemonicVerification(page, adminMnemonic);
 
-      // Wait for dashboard or pending
+      // Wait for dashboard, pending, or welcome overlay
+      const enterCommunityBtn = page.getByRole('button', { name: /enter community/i });
       await Promise.race([
         expect(page.getByRole('heading', { name: /registration pending/i })).toBeVisible({ timeout: TIMEOUT.long }),
         expect(page).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.long }),
+        expect(enterCommunityBtn).toBeVisible({ timeout: TIMEOUT.long }),
       ]);
 
       // Handle welcome overlay if present
-      const welcomeOverlay = page.locator('.welcome-overlay');
-      if (await welcomeOverlay.isVisible().catch(() => false)) {
-        await page.getByRole('button', { name: /enter community/i }).click();
+      if (await enterCommunityBtn.isVisible().catch(() => false)) {
+        await enterCommunityBtn.click();
         await expect(page).toHaveURL(/#\/dashboard/, { timeout: TIMEOUT.short });
       }
 
