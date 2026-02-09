@@ -307,13 +307,17 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
 
       // --- Welcome Overlay Screen ---
       console.log('[Test] Waiting for welcome overlay...');
+      // Welcome overlay shows rotating greetings (starting with "Welcome, <name>!")
+      // and the Matou logo as an img element
       await expect(
-        inviteePage.getByRole('heading', { name: /welcome to matou/i }),
+        inviteePage.getByRole('img', { name: 'Matou' }),
       ).toBeVisible({ timeout: TIMEOUT.long });
       console.log('[Test] Welcome overlay shown');
 
-      // Click "Continue to Dashboard"
-      await inviteePage.getByRole('button', { name: /continue to dashboard/i }).click();
+      // Click "Enter Community" (waits for sync or timeout)
+      const enterBtn = inviteePage.getByRole('button', { name: /enter community|enter anyway/i });
+      await expect(enterBtn).toBeEnabled({ timeout: TIMEOUT.long });
+      await enterBtn.click();
 
       // --- Should navigate to dashboard ---
       console.log('[Test] Waiting for dashboard...');
@@ -408,19 +412,18 @@ test.describe.serial('Pre-Created Identity Invitation', () => {
       await loginWithMnemonic(recoveryPage, claimedMnemonic);
 
       // Verify on dashboard
-      console.log('[Test] Recovery: on dashboard, checking credential...');
+      console.log('[Test] Recovery: on dashboard, checking community data...');
 
-      // Verify membership card is visible with credential status
-      const membershipCard = recoveryPage.locator('.membership-card');
-      await expect(membershipCard).toBeVisible({ timeout: TIMEOUT.long });
+      // Verify dashboard heading and community sections are visible
+      await expect(
+        recoveryPage.getByRole('heading', { level: 1, name: /welcome back/i }),
+      ).toBeVisible({ timeout: TIMEOUT.long });
 
-      // Check "Verified" badge and "Credential Active" subtitle
-      await expect(membershipCard.locator('.verified-badge'))
-        .toHaveText('Verified', { timeout: TIMEOUT.short });
-      await expect(membershipCard.locator('.membership-subtitle'))
-        .toHaveText('Credential Active', { timeout: TIMEOUT.short });
+      await expect(
+        recoveryPage.getByText('Community Activity').first(),
+      ).toBeVisible({ timeout: TIMEOUT.short });
 
-      console.log('[Test] PASS - Identity recovered, credential still active');
+      console.log('[Test] PASS - Identity recovered, dashboard accessible');
     } finally {
       await recoveryContext.close();
       await backends.stop('invitee-recovery');

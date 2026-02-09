@@ -10,17 +10,18 @@ build:
 	go build -o bin/server ./cmd/server
 
 # Cross-platform builds for Electron packaging
+# CGO_ENABLED=0 ensures static binaries that work on any Linux (no glibc dependency)
 build-darwin-arm64:
-	GOOS=darwin GOARCH=arm64 go build -o bin/darwin-arm64/matou-backend ./cmd/server
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o bin/darwin-arm64/matou-backend ./cmd/server
 
 build-darwin-amd64:
-	GOOS=darwin GOARCH=amd64 go build -o bin/darwin-amd64/matou-backend ./cmd/server
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o bin/darwin-amd64/matou-backend ./cmd/server
 
 build-linux-amd64:
-	GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/matou-backend ./cmd/server
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/linux-amd64/matou-backend ./cmd/server
 
 build-windows-amd64:
-	GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/matou-backend.exe ./cmd/server
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o bin/windows-amd64/matou-backend.exe ./cmd/server
 
 build-all: build-darwin-arm64 build-darwin-amd64 build-linux-amd64 build-windows-amd64
 

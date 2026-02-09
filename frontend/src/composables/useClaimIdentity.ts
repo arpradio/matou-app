@@ -72,7 +72,7 @@ export function useClaimIdentity() {
       const aid = aids[0];
       const client = keriClient.getSignifyClient();
       if (client) {
-        const habState = await client.identifiers().get(aid.name);
+        const habState = await client.identifiers().get(aid.prefix);
         const sn = parseInt(String(habState?.state?.s ?? '0'), 16);
         console.log('[ClaimIdentity:validate] AID key state s =', sn, 'raw =', habState?.state?.s);
         if (sn > 0) {
@@ -128,7 +128,7 @@ export function useClaimIdentity() {
         const aidName = profileName.toLowerCase().replace(/\s+/g, '-');
         if (aidName !== aid.name) {
           progress.value = 'Updating identity name...';
-          const updated = await client.identifiers().update(aid.name, { name: aidName });
+          const updated = await client.identifiers().update(aid.prefix, { name: aidName });
           console.log(`[ClaimIdentity] Renamed AID from "${aid.name}" to "${updated.name}"`);
           aid = updated;
         }
@@ -209,7 +209,7 @@ export function useClaimIdentity() {
           // retrieves ACDC/ISS/ANC data from the GRANT's cloned attachments.
           // Including embeds here would cause psr.parseOne() to fail looking
           // for path-labeled CESR attachments that aren't present.
-          const hab = await client.identifiers().get(aid.name);
+          const hab = await client.identifiers().get(aid.prefix);
           const [admit, sigs, atc] = await client.exchanges().createExchangeMessage(
             hab,
             '/ipex/admit',
@@ -219,7 +219,7 @@ export function useClaimIdentity() {
             undefined,
             grant.a.d,
           );
-          await client.ipex().submitAdmit(aid.name, admit, sigs, atc, [grantSender]);
+          await client.ipex().submitAdmit(aid.prefix, admit, sigs, atc, [grantSender]);
           await client.notifications().mark(grant.i);
           console.log(`[ClaimIdentity] Admitted grant ${grant.a.d}`);
         } catch (admitErr) {
@@ -254,7 +254,7 @@ export function useClaimIdentity() {
       step.value = 'rotating';
       progress.value = 'Rotating keys to take ownership...';
 
-      await keriClient.rotateKeys(aid.name);
+      await keriClient.rotateKeys(aid.prefix);
       console.log('[ClaimIdentity] AID keys rotated');
 
       // Persist session (same passcode — no agent rotation)

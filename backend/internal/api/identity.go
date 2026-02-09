@@ -203,8 +203,11 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 					fmt.Printf("[Identity] Warning: derived ID %s != created ID %s, using created ID\n", derivedID, actualID)
 				}
 			} else {
-				// Recovery mode: try to recover existing space, fall back to create
-				_, getErr := client.GetSpace(ctx, derivedID)
+				// Recovery mode: try to recover existing space, fall back to create.
+				// Use a short timeout so a slow/unreachable network doesn't block the response.
+				recoverCtx, recoverCancel := context.WithTimeout(ctx, 10*time.Second)
+				_, getErr := client.GetSpace(recoverCtx, derivedID)
+				recoverCancel()
 				if getErr != nil {
 					fmt.Printf("[Identity] Private space not on network, creating new: %v\n", getErr)
 					result, createErr := client.CreateSpaceWithKeys(ctx, req.AID, anysync.SpaceTypePrivate, keys)
@@ -244,9 +247,14 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 		}
 	}
 
-	// 6. Recover community space (if configured) — skip in claim mode
+	// 6. Recover community space (if configured) — skip in claim mode.
+	// Use a short timeout per space so slow network doesn't block the response.
+	const spaceRecoverTimeout = 10 * time.Second
 	if req.CommunitySpaceID != "" && !isClaim {
-		if _, err := client.GetSpace(ctx, req.CommunitySpaceID); err != nil {
+		communityCtx, communityCancel := context.WithTimeout(ctx, spaceRecoverTimeout)
+		_, err := client.GetSpace(communityCtx, req.CommunitySpaceID)
+		communityCancel()
+		if err != nil {
 			fmt.Printf("[Identity] Failed to sync community space %s: %v\n", req.CommunitySpaceID, err)
 		} else {
 			fmt.Printf("[Identity] Recovered community space: %s\n", req.CommunitySpaceID)
@@ -259,7 +267,10 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 
 	// 7. Recover read-only space (if configured) — skip in claim mode
 	if req.ReadOnlySpaceID != "" && !isClaim {
-		if _, err := client.GetSpace(ctx, req.ReadOnlySpaceID); err != nil {
+		roCtx, roCancel := context.WithTimeout(ctx, spaceRecoverTimeout)
+		_, err := client.GetSpace(roCtx, req.ReadOnlySpaceID)
+		roCancel()
+		if err != nil {
 			fmt.Printf("[Identity] Failed to sync readonly space %s: %v\n", req.ReadOnlySpaceID, err)
 		} else {
 			fmt.Printf("[Identity] Recovered readonly space: %s\n", req.ReadOnlySpaceID)
@@ -271,7 +282,10 @@ func (h *IdentityHandler) HandleSetIdentity(w http.ResponseWriter, r *http.Reque
 
 	// 8. Recover admin space (if configured) — skip in claim mode
 	if adminSpaceID := h.spaceManager.GetAdminSpaceID(); adminSpaceID != "" && !isClaim {
-		if _, err := client.GetSpace(ctx, adminSpaceID); err != nil {
+		adminCtx, adminCancel := context.WithTimeout(ctx, spaceRecoverTimeout)
+		_, err := client.GetSpace(adminCtx, adminSpaceID)
+		adminCancel()
+		if err != nil {
 			fmt.Printf("[Identity] Failed to sync admin space %s: %v\n", adminSpaceID, err)
 		} else {
 			fmt.Printf("[Identity] Recovered admin space: %s\n", adminSpaceID)

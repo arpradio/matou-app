@@ -508,6 +508,13 @@ export class KERIClient {
   private readonly ORG_AID = 'EI7LkuTY607pTjtq2Wtxn6tHcb7--_279EKT5eNNnXU9';
 
   /**
+   * Get the KERIA CESR endpoint URL (used for constructing OOBIs)
+   */
+  getCesrUrl(): string {
+    return this.cesrUrl;
+  }
+
+  /**
    * Get the organization's OOBI URL
    * This is a well-known endpoint that users can resolve to contact the org
    */
@@ -941,7 +948,19 @@ export class KERIClient {
 
     console.log(`[KERIClient] Getting OOBI for "${aidName}" (role: ${role})...`);
 
-    const oobiResult = await this.client.oobis().get(aidName, role);
+    let oobiResult;
+    try {
+      oobiResult = await this.client.oobis().get(aidName, role);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      if (msg.includes('401') || msg.includes('Unauthorized')) {
+        console.log('[KERIClient] OOBI fetch got 401, reconnecting and retrying...');
+        await this.reconnect();
+        oobiResult = await this.client.oobis().get(aidName, role);
+      } else {
+        throw err;
+      }
+    }
 
     // The oobis().get() returns an object with the OOBI URL
     let oobi = oobiResult.oobis?.[0] || oobiResult.oobi;
