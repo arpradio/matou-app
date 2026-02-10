@@ -28,38 +28,27 @@ func TestIntegration_P2PSync_CredentialTree(t *testing.T) {
 
 	client := newTestSDKClient(t)
 
+	// Use CreateSpace (not CreateSpaceWithKeys) so read keys are properly
+	// registered in the space's ACL state for encrypted content operations.
+	result, err := client.CreateSpace(ctx, "ETestSync_Owner", SpaceTypePrivate, nil)
+	if err != nil {
+		t.Fatalf("creating space: %v", err)
+	}
+
 	t.Run("create space with keys", func(t *testing.T) {
-		keys, err := GenerateSpaceKeySet()
-		if err != nil {
-			t.Fatalf("generating keys: %v", err)
-		}
-
-		result, err := client.CreateSpaceWithKeys(ctx, "ETestSync_Owner", SpaceTypePrivate, keys)
-		if err != nil {
-			t.Fatalf("creating space: %v", err)
-		}
-
 		if result.SpaceID == "" {
 			t.Fatal("expected non-empty space ID")
 		}
-
+		if result.Keys == nil {
+			t.Fatal("expected non-nil keys")
+		}
 		t.Logf("Created space: %s", result.SpaceID)
 	})
 
 	t.Run("create credential tree and add credential", func(t *testing.T) {
-		keys, err := GenerateSpaceKeySet()
-		if err != nil {
-			t.Fatalf("generating keys: %v", err)
-		}
-
-		result, err := client.CreateSpaceWithKeys(ctx, "ETestSync_TreeOwner", SpaceTypePrivate, keys)
-		if err != nil {
-			t.Fatalf("creating space: %v", err)
-		}
-
 		treeMgr := NewCredentialTreeManager(client, nil)
 
-		treeID, err := treeMgr.CreateCredentialTree(ctx, result.SpaceID, keys.SigningKey)
+		treeID, err := treeMgr.CreateCredentialTree(ctx, result.SpaceID, result.Keys.SigningKey)
 		if err != nil {
 			t.Fatalf("creating credential tree: %v", err)
 		}
@@ -79,7 +68,7 @@ func TestIntegration_P2PSync_CredentialTree(t *testing.T) {
 			Timestamp: time.Now().Unix(),
 		}
 
-		changeID, err := treeMgr.AddCredential(ctx, result.SpaceID, cred, keys.SigningKey)
+		changeID, err := treeMgr.AddCredential(ctx, result.SpaceID, cred, result.Keys.SigningKey)
 		if err != nil {
 			t.Fatalf("adding credential: %v", err)
 		}
@@ -122,17 +111,26 @@ func TestIntegration_P2PSync_ACLInvite(t *testing.T) {
 
 	client := newTestSDKClient(t)
 
-	keys, err := GenerateSpaceKeySet()
-	if err != nil {
-		t.Fatalf("generating keys: %v", err)
-	}
-
-	result, err := client.CreateSpaceWithKeys(ctx, "ETestACL_Owner", SpaceTypeCommunity, keys)
+	result, err := client.CreateSpace(ctx, "ETestACL_Owner", SpaceTypeCommunity, nil)
 	if err != nil {
 		t.Fatalf("creating space: %v", err)
 	}
 
 	t.Logf("Created community space: %s", result.SpaceID)
+
+	// Wait for space to propagate to tree nodes, then mark as shareable.
+	// The coordinator may not know about the space yet, so retry.
+	shareDeadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(shareDeadline) {
+		err = client.MakeSpaceShareable(ctx, result.SpaceID)
+		if err == nil {
+			break
+		}
+		time.Sleep(2 * time.Second)
+	}
+	if err != nil {
+		t.Fatalf("failed to make space shareable: %v", err)
+	}
 
 	aclMgr := NewMatouACLManager(client, nil)
 

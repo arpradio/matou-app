@@ -318,10 +318,35 @@ export async function loginWithMnemonic(
     await page.locator(`#word-${i}`).fill(mnemonic[i]);
   }
 
-  await page.getByRole('button', { name: /recover identity/i }).click();
-  await expect(
-    page.getByText(/identity recovered/i),
-  ).toBeVisible({ timeout: TIMEOUT.long });
+  // Retry recovery up to 3 times — KERIA can be temporarily unreachable
+  // under load (e.g. when running the full test suite sequentially).
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    await page.getByRole('button', { name: /recover identity/i }).click();
+
+    try {
+      await expect(
+        page.getByText(/identity recovered/i),
+      ).toBeVisible({ timeout: TIMEOUT.long });
+      break; // success
+    } catch {
+      const errorVisible = await page
+        .getByText(/failed to fetch|connection error|failed/i)
+        .first()
+        .isVisible()
+        .catch(() => false);
+
+      if (errorVisible && attempt < 3) {
+        console.log(
+          `[loginWithMnemonic] Recovery attempt ${attempt}/3 failed (KERIA error), retrying in 5s...`,
+        );
+        await page.waitForTimeout(5000);
+        continue;
+      }
+      throw new Error(
+        `Identity recovery failed after ${attempt} attempt(s). KERIA may be unhealthy.`,
+      );
+    }
+  }
 
   // Click continue to proceed to welcome screen
   await page.getByRole('button', { name: /continue/i }).click();

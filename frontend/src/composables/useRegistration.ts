@@ -86,14 +86,17 @@ export function useRegistration() {
       console.log(`[Registration] Found ${admins.length} admin(s) to notify`);
       console.log('[Registration] Admin details:', JSON.stringify(admins, null, 2));
 
-      // Step 2: Get sender's OOBI to include in registration
+      // Step 2: Get sender's OOBI to include in registration (required for credential delivery)
       let senderOOBI = '';
       try {
-        senderOOBI = await keriClient.getOOBI(currentAID.name);
+        senderOOBI = await keriClient.getOOBI(currentAID.prefix);
         console.log('[Registration] Got sender OOBI:', senderOOBI);
       } catch (oobiErr) {
-        console.warn('[Registration] Could not get sender OOBI:', oobiErr);
-        // Continue without OOBI - admin may not be able to contact back
+        console.error('[Registration] Could not get sender OOBI:', oobiErr);
+        throw new Error('Could not generate your OOBI — the admin needs this to deliver your credential. Please ensure KERIA is running and try again.');
+      }
+      if (!senderOOBI) {
+        throw new Error('Generated OOBI is empty — cannot register without a valid OOBI for credential delivery.');
       }
 
       // Step 3: Resolve org OOBI (required for credential delivery)
@@ -111,7 +114,7 @@ export function useRegistration() {
       // Uses both custom EXN (for our patch) and IPEX apply (native KERIA support)
       console.log('[Registration] Sending registration to admins...');
       const result = await keriClient.sendRegistrationToAdmins(
-        currentAID.name,
+        currentAID.prefix,
         admins.map(a => ({ aid: a.aid, oobi: a.oobi })),
         {
           name: profile.name,
@@ -229,7 +232,7 @@ export function useRegistration() {
     try {
       // Admin OOBI was already resolved during registration submission
       const result = await keriClient.sendEXN(
-        currentAID.name,
+        currentAID.prefix,
         adminAid,
         '/matou/registration/message_reply',
         {

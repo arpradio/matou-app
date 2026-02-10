@@ -85,7 +85,7 @@ export function useAdminActions() {
       const orgAid = aids.aids?.find((a: { prefix: string }) => a.prefix === storedOrgAid);
       if (orgAid) {
         console.log('[AdminActions] Using stored org AID:', orgAid.name);
-        return orgAid.name;
+        return orgAid.prefix;
       }
     }
 
@@ -101,11 +101,11 @@ export function useAdminActions() {
     );
 
     if (orgAid) {
-      return orgAid.name;
+      return orgAid.prefix;
     }
 
     // Fall back to first AID (admin's personal AID might be issuing)
-    return aids.aids[0].name;
+    return aids.aids[0].prefix;
   }
 
   /**
@@ -142,16 +142,23 @@ export function useAdminActions() {
         throw new Error('No registry configured for credential issuance');
       }
 
-      // 2. Resolve applicant OOBI if provided (so we can send them the credential)
-      if (registration.applicantOOBI) {
-        try {
-          await keriClient.resolveOOBI(registration.applicantOOBI, undefined, 10000);
-          console.log('[AdminActions] Resolved applicant OOBI');
-        } catch (oobiErr) {
-          console.warn('[AdminActions] Could not resolve applicant OOBI:', oobiErr);
-          // Continue anyway - might already be resolved
+      // 2. Resolve applicant OOBI (required for IPEX grant delivery)
+      let applicantOOBI = registration.applicantOOBI;
+      if (!applicantOOBI) {
+        // Fallback: construct OOBI from KERIA CESR URL + applicant AID
+        const cesrUrl = keriClient.getCesrUrl();
+        if (cesrUrl && registration.applicantAid) {
+          applicantOOBI = `${cesrUrl}/oobi/${registration.applicantAid}`;
+          console.log(`[AdminActions] Constructed fallback OOBI: ${applicantOOBI}`);
+        } else {
+          throw new Error('Cannot issue credential: applicant OOBI is missing and could not construct fallback. The applicant may need to re-register.');
         }
       }
+      const oobiResolved = await keriClient.resolveOOBI(applicantOOBI, undefined, 30000);
+      if (!oobiResolved) {
+        throw new Error('Could not resolve applicant OOBI — unable to deliver credential. Please check that KERIA is running and try again.');
+      }
+      console.log('[AdminActions] Resolved applicant OOBI');
 
       // 3. Get the issuing AID name
       const issuerAidName = await getOrgAidName();
@@ -327,7 +334,7 @@ export function useAdminActions() {
 
       console.log('[AdminActions] Sending decline notification to:', registration.applicantAid);
       const result = await keriClient.sendEXN(
-        currentAID.name,
+        currentAID.prefix,
         registration.applicantAid,
         '/matou/registration/decline',
         payload
@@ -410,7 +417,7 @@ export function useAdminActions() {
 
       console.log('[AdminActions] Sending message to:', registration.applicantAid);
       const result = await keriClient.sendEXN(
-        currentAID.name,
+        currentAID.prefix,
         registration.applicantAid,
         '/matou/registration/message',
         payload
