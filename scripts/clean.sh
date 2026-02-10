@@ -111,6 +111,129 @@ for f in "$ROOT"/backend/*.out "$ROOT"/backend/coverage.html; do
   [ -f "$f" ] && remove "$f"
 done
 
+# --- Browser storage ---
+echo -e "${BOLD}Browser storage${NC}"
+CLEAR_PAGE="/tmp/matou-clear-storage.html"
+if [ "$DRY_RUN" = true ]; then
+  echo -e "  ${YELLOW}would open${NC} browser storage cleaner for localhost:5100-5102"
+else
+  # Create a temporary HTML page that clears all browser storage for dev origins
+  cat > "$CLEAR_PAGE" << 'HTMLEOF'
+<!DOCTYPE html>
+<html><head><title>Matou — Clearing Storage</title>
+<style>
+  body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 2rem; }
+  .ok { color: #4ecca3; } .err { color: #e74c3c; } .info { color: #f0c040; }
+  h2 { color: #4ecca3; margin-top: 2rem; }
+  pre { background: #16213e; padding: 1rem; border-radius: 4px; overflow-x: auto; }
+</style>
+</head><body>
+<h1>Matou — Browser Storage Cleaner</h1>
+<pre id="log"></pre>
+<script>
+const log = document.getElementById('log');
+function out(msg, cls) {
+  const span = document.createElement('span');
+  span.className = cls || '';
+  span.textContent = msg + '\n';
+  log.appendChild(span);
+}
+
+async function clearCurrentOrigin() {
+  out(`Clearing storage for ${location.origin} ...`, 'info');
+
+  // localStorage
+  try { localStorage.clear(); out('  localStorage cleared', 'ok'); }
+  catch(e) { out('  localStorage: ' + e.message, 'err'); }
+
+  // sessionStorage
+  try { sessionStorage.clear(); out('  sessionStorage cleared', 'ok'); }
+  catch(e) { out('  sessionStorage: ' + e.message, 'err'); }
+
+  // IndexedDB
+  try {
+    const dbs = await indexedDB.databases();
+    for (const db of dbs) {
+      indexedDB.deleteDatabase(db.name);
+      out('  IndexedDB deleted: ' + db.name, 'ok');
+    }
+    if (dbs.length === 0) out('  IndexedDB: no databases', 'ok');
+  } catch(e) { out('  IndexedDB: ' + e.message, 'err'); }
+
+  // Cache Storage
+  try {
+    const keys = await caches.keys();
+    for (const key of keys) {
+      await caches.delete(key);
+      out('  Cache deleted: ' + key, 'ok');
+    }
+    if (keys.length === 0) out('  Cache Storage: no caches', 'ok');
+  } catch(e) { out('  Cache Storage: ' + e.message, 'err'); }
+
+  // Service Workers
+  try {
+    const regs = await navigator.serviceWorker.getRegistrations();
+    for (const reg of regs) {
+      await reg.unregister();
+      out('  Service Worker unregistered: ' + reg.scope, 'ok');
+    }
+    if (regs.length === 0) out('  Service Workers: none registered', 'ok');
+  } catch(e) { out('  Service Workers: ' + e.message, 'err'); }
+
+  out('Done for ' + location.origin, 'ok');
+}
+
+clearCurrentOrigin().then(() => {
+  out('\nAll storage cleared. You can close this tab.', 'info');
+});
+</script>
+</body></html>
+HTMLEOF
+
+  # Serve the clear page on each dev session origin so browser storage is
+  # cleared for the correct localhost:<port> origin.
+  for port in 5100 5101 5102; do
+    if ss -tlnp 2>/dev/null | grep -q ":${port} "; then
+      echo -e "  ${RED}FAILED${NC} port ${port} is in use. Stop dev sessions first:"
+      echo -e "    npm run dev:sessions:stop"
+      echo ""
+      rm -f "$CLEAR_PAGE"
+      exit 1
+    fi
+  done
+
+  STARTED_PORTS=()
+  for port in 5100 5101 5102; do
+    python3 -c "
+import http.server, threading, time
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def translate_path(self, path):
+        return '$CLEAR_PAGE'
+    def log_message(self, *a): pass
+
+srv = http.server.HTTPServer(('localhost', $port), Handler)
+threading.Thread(target=srv.serve_forever, daemon=True).start()
+time.sleep(6)
+srv.shutdown()
+" &
+    STARTED_PORTS+=("$port")
+  done
+
+  if [ ${#STARTED_PORTS[@]} -gt 0 ]; then
+    sleep 0.5
+    for port in "${STARTED_PORTS[@]}"; do
+      xdg-open "http://localhost:${port}/clear-storage.html" 2>/dev/null &
+    done
+    echo -e "  ${GREEN}opened${NC} browser storage cleaner for localhost:${STARTED_PORTS[*]// /, }"
+    echo -e "  ${YELLOW}note:${NC} wait for pages to finish, then close tabs (~5s)"
+    wait 2>/dev/null
+  fi
+
+  # Clean up the HTML file
+  rm -f "$CLEAR_PAGE"
+fi
+
 # --- Node modules (only with --all) ---
 if [ "$CLEAN_NODE_MODULES" = true ]; then
   echo -e "${BOLD}Node modules${NC}"

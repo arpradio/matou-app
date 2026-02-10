@@ -378,7 +378,7 @@ export class KERIClient {
     // that may lack `state` and `salty`/`randy` fields required by controller.rotate()
     const listResult = await this.client.identifiers().list();
     const aids = await Promise.all(
-      listResult.aids.map((a: { name: string }) => this.client!.identifiers().get(a.name))
+      listResult.aids.map((a: { prefix: string }) => this.client!.identifiers().get(a.prefix))
     );
     const res = await this.client.rotate(newBran, aids);
     if (!res.ok) {
@@ -594,7 +594,7 @@ export class KERIClient {
         console.warn(`[KERIClient] get(${senderName}) failed, trying list():`, getErr);
         // Workaround: list all AIDs and find by name
         const aids = await this.client.identifiers().list();
-        const found = aids.aids.find((a: { name: string }) => a.name === senderName);
+        const found = aids.aids.find((a: { name: string; prefix: string }) => a.prefix === senderName || a.name === senderName);
         if (!found) {
           throw new Error(`AID "${senderName}" not found`);
         }
@@ -624,9 +624,9 @@ export class KERIClient {
 
       console.log('[KERIClient] Sending registration to org...');
 
-      // Send the message
+      // Send the message — use prefix to avoid URL signing issues with spaces
       await this.client.exchanges().sendFromEvents(
-        senderName,
+        sender.prefix,
         'registration',  // Topic
         exn,
         sigs,
@@ -719,7 +719,7 @@ export class KERIClient {
     } catch (getErr) {
       console.warn(`[KERIClient] get(${masterAidName}) failed, trying list():`, getErr);
       const aids = await this.client.identifiers().list();
-      const found = aids.aids.find((a: { name: string }) => a.name === masterAidName);
+      const found = aids.aids.find((a: { name: string; prefix: string }) => a.prefix === masterAidName || a.name === masterAidName);
       if (!found) {
         throw new Error(`Master AID "${masterAidName}" not found`);
       }
@@ -745,7 +745,8 @@ export class KERIClient {
     await this.client.operations().wait(op, { signal: AbortSignal.timeout(60000) });
     console.log('[KERIClient] Group AID operation completed');
 
-    // Get the created group AID
+    // Get the created group AID — use name here since we just created it and
+    // don't have the prefix yet. Group AID names are slugified (no spaces).
     let groupAid;
     try {
       groupAid = await this.client.identifiers().get(name);
@@ -762,15 +763,15 @@ export class KERIClient {
     console.log(`[KERIClient] Created group AID: ${groupAid.prefix}`);
 
     // Add agent end role so the group AID's OOBI can be served via KERIA.
-    // Without this, oobis().get(name, 'agent') returns nothing, and other
+    // Without this, oobis().get(prefix, 'agent') returns nothing, and other
     // agents can't resolve the org AID's key state for grant verification.
     const agentId = this.client.agent?.pre;
     if (agentId) {
       try {
-        const endRoleResult = await this.client.identifiers().addEndRole(name, 'agent', agentId);
+        const endRoleResult = await this.client.identifiers().addEndRole(groupAid.prefix, 'agent', agentId);
         const endRoleOp = await endRoleResult.op();
         await this.client.operations().wait(endRoleOp, { signal: AbortSignal.timeout(30000) });
-        console.log(`[KERIClient] Agent end role added to group AID "${name}"`);
+        console.log(`[KERIClient] Agent end role added to group AID "${groupAid.prefix}"`);
       } catch (err) {
         console.warn(`[KERIClient] Failed to add agent end role to group AID:`, err);
       }
@@ -850,13 +851,13 @@ export class KERIClient {
       issuerAid = await this.client.identifiers().get(issuerAidName);
     } catch (getErr) {
       const aids = await this.client.identifiers().list();
-      const found = aids.aids.find((a: { name: string }) => a.name === issuerAidName);
+      const found = aids.aids.find((a: { name: string; prefix: string }) => a.prefix === issuerAidName || a.name === issuerAidName);
       if (!found) throw new Error(`Issuer AID "${issuerAidName}" not found`);
       issuerAid = found;
     }
 
-    // Create the credential
-    const credResult = await this.client.credentials().issue(issuerAidName, {
+    // Create the credential — use prefix, not display name
+    const credResult = await this.client.credentials().issue(issuerAid.prefix, {
       ri: registryId,
       s: schemaId,
       a: {
@@ -879,7 +880,7 @@ export class KERIClient {
     console.log('[KERIClient] Granting credential via IPEX...');
 
     const [grant, gsigs, end] = await this.client.ipex().grant({
-      senderName: issuerAidName,
+      senderName: issuerAid.prefix,
       recipient: recipientAid,
       message: grantMessage || '',
       acdc: credResult.acdc,
@@ -889,7 +890,7 @@ export class KERIClient {
     });
 
     // Submit the grant
-    await this.client.ipex().submitGrant(issuerAidName, grant, gsigs, end, [recipientAid]);
+    await this.client.ipex().submitGrant(issuerAid.prefix, grant, gsigs, end, [recipientAid]);
     const grantSaid = (grant as { ked?: { d?: string } })?.ked?.d || 'unknown';
     console.log(`[KERIClient] IPEX grant submitted, SAID: ${grantSaid}`);
 
@@ -1374,7 +1375,7 @@ export class KERIClient {
           await this.ensureConnected();
           console.log(`[KERIClient] Sending IPEX apply to ${admin.aid}...`);
           const [apply, applySigs, applyEnd] = await this.client.ipex().apply({
-            senderName: actualSenderName,  // Use actual identifier name for IPEX
+            senderName: senderAid,  // Use AID prefix — names with spaces break URL signing
             recipient: admin.aid,  // Admin AID should already be a prefix
             schema: schemaSaid,
             attributes: {
@@ -1398,7 +1399,7 @@ export class KERIClient {
             },
             datetime: new Date().toISOString(),
           });
-          await this.client.ipex().submitApply(actualSenderName, apply, applySigs, applyEnd, [admin.aid]);
+          await this.client.ipex().submitApply(senderAid, apply, applySigs, applyEnd, [admin.aid]);
           const applySaid = (apply as { ked?: { d?: string } })?.ked?.d || 'unknown';
           console.log(`[KERIClient] IPEX apply sent, SAID: ${applySaid}`);
         } catch (ipexErr) {
