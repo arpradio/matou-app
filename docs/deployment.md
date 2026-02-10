@@ -217,20 +217,20 @@ VERSION="0.1.0"
 PACKAGED="frontend/dist/electron/Packaged"
 REGISTRY="https://gitlab.com/api/v4/projects/78188786/packages/generic/matou/${VERSION}"
 
-# Upload each artifact (use -4 to force IPv4 — IPv6 uploads may fail)
-curl -4 --header "PRIVATE-TOKEN: $TOKEN" \
+# Upload each artifact
+curl --header "PRIVATE-TOKEN: $TOKEN" \
   --upload-file "${PACKAGED}/matou-${VERSION}.AppImage" \
   "${REGISTRY}/matou-${VERSION}.AppImage"
 
-curl -4 --header "PRIVATE-TOKEN: $TOKEN" \
+curl --header "PRIVATE-TOKEN: $TOKEN" \
   --upload-file "${PACKAGED}/matou-${VERSION}.exe" \
   "${REGISTRY}/matou-${VERSION}.exe"
 
-curl -4 --header "PRIVATE-TOKEN: $TOKEN" \
+curl --header "PRIVATE-TOKEN: $TOKEN" \
   --upload-file "${PACKAGED}/matou-${VERSION}-mac-arm64.zip" \
   "${REGISTRY}/matou-${VERSION}-mac-arm64.zip"
 
-curl -4 --header "PRIVATE-TOKEN: $TOKEN" \
+curl --header "PRIVATE-TOKEN: $TOKEN" \
   --upload-file "${PACKAGED}/matou-${VERSION}-mac-x64.zip" \
   "${REGISTRY}/matou-${VERSION}-mac-x64.zip"
 ```
@@ -376,19 +376,6 @@ POST .../uploads: 413 entity is too large
 ```
 
 GitLab's direct upload API has a ~100 MB limit. Packaged Electron apps typically exceed this. Use the Generic Package Registry instead (see [Upload via glab](#upload-via-glab-cli) above).
-
-### Upload fails with connection reset (exit code 56)
-
-```
-curl: (56) Recv failure: Connection reset by peer
-```
-
-Large file uploads to GitLab can fail over IPv6. Force IPv4 with `curl -4`:
-
-```bash
-curl -4 --header "PRIVATE-TOKEN: $TOKEN" \
-  --upload-file <file> <url>
-```
 
 ### Linux sandbox errors
 

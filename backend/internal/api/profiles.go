@@ -327,8 +327,11 @@ func (h *ProfilesHandler) HandleMyProfiles(w http.ResponseWriter, r *http.Reques
 		if err != nil {
 			continue
 		}
-		// Filter by AID in the data or object ID pattern
 		latest := deduplicateObjects(objects)
+		// Private space is already per-user; shared spaces need AID filtering
+		if pt.typeName != "PrivateProfile" {
+			latest = filterObjectsByAID(latest, aid)
+		}
 		if len(latest) > 0 {
 			result[pt.typeName] = latest
 		}
@@ -549,6 +552,32 @@ func (h *ProfilesHandler) resolveSpaceForType(def *types.TypeDefinition) string 
 		return h.spaceManager.GetAdminSpaceID()
 	}
 	return ""
+}
+
+// filterObjectsByAID returns only objects whose data contains an "aid" or "userAID"
+// field matching the given AID, or whose object ID contains the AID.
+func filterObjectsByAID(objects []*anysync.ObjectPayload, aid string) []*anysync.ObjectPayload {
+	if aid == "" {
+		return objects
+	}
+	var filtered []*anysync.ObjectPayload
+	for _, obj := range objects {
+		// Check object ID pattern (e.g. "SharedProfile-EAbcd..." or "CommunityProfile-EAbcd...")
+		if strings.Contains(obj.ID, aid) {
+			filtered = append(filtered, obj)
+			continue
+		}
+		// Check data fields: SharedProfile uses "aid", CommunityProfile uses "userAID"
+		var data map[string]interface{}
+		if err := json.Unmarshal(obj.Data, &data); err == nil {
+			if profileAID, ok := data["aid"].(string); ok && profileAID == aid {
+				filtered = append(filtered, obj)
+			} else if profileAID, ok := data["userAID"].(string); ok && profileAID == aid {
+				filtered = append(filtered, obj)
+			}
+		}
+	}
+	return filtered
 }
 
 // deduplicateObjects keeps only the latest version of each object by ID.
