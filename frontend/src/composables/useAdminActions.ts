@@ -160,6 +160,14 @@ export function useAdminActions() {
       }
       console.log('[AdminActions] Resolved applicant OOBI');
 
+      // 2b. Verify contact is established before proceeding with credential issuance
+      console.log('[AdminActions] Verifying contact establishment...');
+      const contactVerified = await keriClient.verifyContact(registration.applicantAid, 10, 100);
+      if (!contactVerified) {
+        throw new Error('Contact not established after OOBI resolution. Please try again.');
+      }
+      console.log('[AdminActions] Contact verified and ready for credential issuance');
+
       // 3. Get the issuing AID name
       const issuerAidName = await getOrgAidName();
       console.log(`[AdminActions] Issuing credential from AID: ${issuerAidName}`);
