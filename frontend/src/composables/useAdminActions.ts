@@ -162,9 +162,17 @@ export function useAdminActions() {
 
       // 2b. Verify contact is established before proceeding with credential issuance
       console.log('[AdminActions] Verifying contact establishment...');
-      const contactVerified = await keriClient.verifyContact(registration.applicantAid, 10, 100);
+      // Use longer retry with more attempts - OOBI resolution can take time to propagate
+      const contactVerified = await keriClient.verifyContact(registration.applicantAid, 15, 500);
       if (!contactVerified) {
-        throw new Error('Contact not established after OOBI resolution. Please try again.');
+        throw new Error(
+          `Contact not established after OOBI resolution for ${registration.applicantAid.slice(0, 12)}... ` +
+          `This may indicate:\n` +
+          `1. The member's agent end role was not properly configured\n` +
+          `2. The member's OOBI is not accessible\n` +
+          `3. KERIA is not running or not responsive\n\n` +
+          `Please ask the member to re-register, or check KERIA logs for errors.`
+        );
       }
       console.log('[AdminActions] Contact verified and ready for credential issuance');
 

@@ -410,22 +410,29 @@ export class KERIClient {
 
     console.log(`[KERIClient] Adding agent end role for AID: ${aidPrefix}`);
 
-    try {
-      // Get the agent's identifier (eid) - this is the agent AID that serves as endpoint provider
-      const agentId = this.client.agent?.pre;
-      if (!agentId) {
-        throw new Error('Agent identifier not available');
-      }
-      console.log(`[KERIClient] Agent EID: ${agentId}`);
+    // Get the agent's identifier (eid) - this is the agent AID that serves as endpoint provider
+    const agentId = this.client.agent?.pre;
+    if (!agentId) {
+      throw new Error('Agent identifier not available');
+    }
+    console.log(`[KERIClient] Agent EID: ${agentId}`);
 
-      // CRITICAL: Use AID prefix, not display name
-      const endRoleResult = await this.client.identifiers().addEndRole(aidPrefix, 'agent', agentId);
-      const endRoleOp = await endRoleResult.op();
-      await this.client.operations().wait(endRoleOp, { signal: AbortSignal.timeout(30000) });
-      console.log(`[KERIClient] Agent end role added successfully`);
-    } catch (endRoleErr) {
-      console.warn('[KERIClient] Failed to add agent end role:', endRoleErr);
-      // Continue - the AID is created, but may not receive messages
+    // CRITICAL: Use AID prefix, not display name
+    const endRoleResult = await this.client.identifiers().addEndRole(aidPrefix, 'agent', agentId);
+    const endRoleOp = await endRoleResult.op();
+    await this.client.operations().wait(endRoleOp, { signal: AbortSignal.timeout(30000) });
+    console.log(`[KERIClient] Agent end role added successfully for ${aidPrefix}`);
+
+    // Verify the end role was actually added by checking the OOBI is accessible
+    try {
+      const oobiCheck = await this.client.oobis().get(aidPrefix, 'agent');
+      if (!oobiCheck || !oobiCheck.oobis || oobiCheck.oobis.length === 0) {
+        throw new Error(`Agent end role verification failed - OOBI not accessible for ${aidPrefix}`);
+      }
+      console.log(`[KERIClient] Agent end role verified - OOBI is accessible`);
+    } catch (verifyErr) {
+      console.error('[KERIClient] Agent end role verification failed:', verifyErr);
+      throw new Error(`Failed to verify agent end role for ${aidPrefix}. The AID will not be accessible via OOBI. Error: ${verifyErr instanceof Error ? verifyErr.message : String(verifyErr)}`);
     }
   }
 
@@ -545,11 +552,11 @@ export class KERIClient {
    * Verify that a contact exists in KERIA after OOBI resolution
    * Polls with exponential backoff until contact is available
    * @param contactAid - The AID to check for
-   * @param maxAttempts - Maximum number of polling attempts (default: 10)
-   * @param initialDelay - Initial delay in ms (default: 100)
+   * @param maxAttempts - Maximum number of polling attempts (default: 15)
+   * @param initialDelay - Initial delay in ms (default: 500)
    * @returns True if contact exists, false otherwise
    */
-  async verifyContact(contactAid: string, maxAttempts = 10, initialDelay = 100): Promise<boolean> {
+  async verifyContact(contactAid: string, maxAttempts = 15, initialDelay = 500): Promise<boolean> {
     if (!this.client) throw new Error('Not initialized');
 
     let delay = initialDelay;
@@ -558,17 +565,19 @@ export class KERIClient {
         // Try to get the contact - if it exists, this will succeed
         const contact = await this.client.contacts().get(contactAid);
         if (contact) {
-          console.log(`[KERIClient] Contact ${contactAid} verified (attempt ${attempt})`);
+          console.log(`[KERIClient] Contact ${contactAid.slice(0, 12)}... verified (attempt ${attempt}/${maxAttempts})`);
           return true;
         }
       } catch (err) {
+        const errorMsg = err instanceof Error ? err.message : String(err);
         // Contact doesn't exist yet, continue polling
         if (attempt < maxAttempts) {
-          console.log(`[KERIClient] Contact ${contactAid} not found, retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`);
+          console.log(`[KERIClient] Contact ${contactAid.slice(0, 12)}... not found, retrying in ${delay}ms (attempt ${attempt}/${maxAttempts}) - Error: ${errorMsg}`);
           await new Promise(resolve => setTimeout(resolve, delay));
-          delay = Math.min(delay * 2, 2000); // Exponential backoff, max 2s
+          delay = Math.min(delay * 2, 3000); // Exponential backoff, max 3s
         } else {
-          console.warn(`[KERIClient] Contact ${contactAid} not found after ${maxAttempts} attempts`);
+          console.error(`[KERIClient] Contact ${contactAid.slice(0, 12)}... not found after ${maxAttempts} attempts. Last error: ${errorMsg}`);
+          console.error(`[KERIClient] This may indicate the member's agent end role was not properly configured, or the OOBI resolution failed.`);
           return false;
         }
       }
@@ -584,17 +593,27 @@ export class KERIClient {
 
     try {
       const internalOobi = this.toInternalOobiUrl(oobi);
-      console.log(`[KERIClient] Resolving OOBI: ${internalOobi}`);
+      console.log(`[KERIClient] Resolving OOBI: ${internalOobi}${alias ? ` with alias: ${alias}` : ''}`);
+
+      // Extract AID from OOBI URL for logging (format: http://host/oobi/{AID} or http://host/oobi/{AID}/role)
+      const aidMatch = internalOobi.match(/\/oobi\/([^/]+)/);
+      const aidFromOobi = aidMatch ? aidMatch[1] : 'unknown';
+
       const op = await this.client.oobis().resolve(internalOobi, alias);
+      console.log(`[KERIClient] OOBI operation created, waiting for completion...`);
       await this.client.operations().wait(op, { signal: AbortSignal.timeout(timeout) });
-      console.log(`[KERIClient] OOBI resolved successfully`);
+      console.log(`[KERIClient] OOBI resolved successfully for AID: ${aidFromOobi.slice(0, 12)}...`);
+
+      // Give KERIA a moment to process and create the contact entry
+      await new Promise(resolve => setTimeout(resolve, 500));
+
       return true;
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       if (errorMsg.includes('aborted') || errorMsg.includes('timeout')) {
-        console.warn(`[KERIClient] OOBI resolution timed out after ${timeout}ms`);
+        console.error(`[KERIClient] OOBI resolution timed out after ${timeout}ms for: ${oobi}`);
       } else {
-        console.error('[KERIClient] Failed to resolve OOBI:', err);
+        console.error(`[KERIClient] Failed to resolve OOBI: ${oobi}`, err);
       }
       return false;
     }
