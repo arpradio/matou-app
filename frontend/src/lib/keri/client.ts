@@ -541,6 +541,41 @@ export class KERIClient {
    * @param timeout - Timeout in milliseconds (default: 10000)
    * @returns true if successful
    */
+  /**
+   * Verify that a contact exists in KERIA after OOBI resolution
+   * Polls with exponential backoff until contact is available
+   * @param contactAid - The AID to check for
+   * @param maxAttempts - Maximum number of polling attempts (default: 10)
+   * @param initialDelay - Initial delay in ms (default: 100)
+   * @returns True if contact exists, false otherwise
+   */
+  async verifyContact(contactAid: string, maxAttempts = 10, initialDelay = 100): Promise<boolean> {
+    if (!this.client) throw new Error('Not initialized');
+
+    let delay = initialDelay;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        // Try to get the contact - if it exists, this will succeed
+        const contact = await this.client.contacts().get(contactAid);
+        if (contact) {
+          console.log(`[KERIClient] Contact ${contactAid} verified (attempt ${attempt})`);
+          return true;
+        }
+      } catch (err) {
+        // Contact doesn't exist yet, continue polling
+        if (attempt < maxAttempts) {
+          console.log(`[KERIClient] Contact ${contactAid} not found, retrying in ${delay}ms (attempt ${attempt}/${maxAttempts})`);
+          await new Promise(resolve => setTimeout(resolve, delay));
+          delay = Math.min(delay * 2, 2000); // Exponential backoff, max 2s
+        } else {
+          console.warn(`[KERIClient] Contact ${contactAid} not found after ${maxAttempts} attempts`);
+          return false;
+        }
+      }
+    }
+    return false;
+  }
+
   async resolveOOBI(oobi: string, alias?: string, timeout = 10000): Promise<boolean> {
     if (!this.client) throw new Error('Not initialized');
 
