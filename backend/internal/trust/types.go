@@ -18,7 +18,7 @@ type Edge struct {
 	From          string    `json:"from"`          // Issuer AID
 	To            string    `json:"to"`            // Subject AID
 	CredentialID  string    `json:"credentialId"`  // ACDC SAID
-	Type          string    `json:"type"`          // membership, invitation, steward
+	Type          string    `json:"type"`          // membership, invitation, steward, endorsement
 	Bidirectional bool      `json:"bidirectional"` // Mutual relationship
 	CreatedAt     time.Time `json:"createdAt"`
 }
@@ -157,10 +157,12 @@ type Score struct {
 
 // EdgeType constants for credential types
 const (
-	EdgeTypeMembership = "membership"
-	EdgeTypeSteward    = "steward"
-	EdgeTypeInvitation = "invitation"
-	EdgeTypeSelfClaim  = "self_claim"
+	EdgeTypeMembership  = "membership"
+	EdgeTypeSteward     = "steward"
+	EdgeTypeInvitation  = "invitation"
+	EdgeTypeSelfClaim   = "self_claim"
+	EdgeTypeEndorsement = "endorsement"
+	EdgeTypeRevocation  = "revocation"
 )
 
 // SchemaToEdgeType maps credential schemas to edge types
@@ -174,6 +176,10 @@ func SchemaToEdgeType(schema string) string {
 		return EdgeTypeInvitation
 	case "ESelfClaimSchemaV1":
 		return EdgeTypeSelfClaim
+	case "EMatouEndorsementSchemaV1":
+		return EdgeTypeEndorsement
+	case "EMatouEndorsementRevocationSchemaV1":
+		return EdgeTypeRevocation
 	default:
 		return "unknown"
 	}

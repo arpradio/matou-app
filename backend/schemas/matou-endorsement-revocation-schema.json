@@ -1,0 +1,129 @@
+{
+    "$id": "EMatouEndorsementRevocationSchemaV1",
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "MATOU Endorsement Revocation",
+    "description": "A credential revoking a previous endorsement",
+    "type": "object",
+    "credentialType": "MatouEndorsementRevocation",
+    "version": "1.0.0",
+    "properties": {
+        "v": {
+            "description": "Version string",
+            "type": "string"
+        },
+        "d": {
+            "description": "Credential SAID",
+            "type": "string"
+        },
+        "u": {
+            "description": "One time use nonce",
+            "type": "string"
+        },
+        "i": {
+            "description": "Revoker AID (must match original endorser)",
+            "type": "string"
+        },
+        "ri": {
+            "description": "Credential status registry",
+            "type": "string"
+        },
+        "s": {
+            "description": "Schema SAID",
+            "type": "string"
+        },
+        "a": {
+            "oneOf": [
+                {
+                    "description": "Attributes block SAID",
+                    "type": "string"
+                },
+                {
+                    "description": "Attributes block",
+                    "type": "object",
+                    "properties": {
+                        "d": {
+                            "description": "Attributes block SAID",
+                            "type": "string"
+                        },
+                        "i": {
+                            "description": "Endorsee AID (for notification)",
+                            "type": "string"
+                        },
+                        "dt": {
+                            "description": "Revocation date-time",
+                            "type": "string",
+                            "format": "date-time"
+                        },
+                        "reason": {
+                            "description": "Reason for revocation",
+                            "type": "string"
+                        },
+                        "revocationType": {
+                            "description": "Type of revocation",
+                            "type": "string",
+                            "enum": [
+                                "withdrawn",
+                                "expired",
+                                "superseded",
+                                "error"
+                            ]
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": [
+                        "d",
+                        "dt",
+                        "reason",
+                        "revocationType"
+                    ]
+                }
+            ]
+        },
+        "e": {
+            "description": "Edge section linking to the endorsement being revoked",
+            "oneOf": [
+                {
+                    "description": "Edge block SAID",
+                    "type": "string"
+                },
+                {
+                    "description": "Edge block",
+                    "type": "object",
+                    "properties": {
+                        "d": {
+                            "description": "Edge block SAID",
+                            "type": "string"
+                        },
+                        "endorsement": {
+                            "description": "Reference to the endorsement credential being revoked",
+                            "type": "object",
+                            "properties": {
+                                "n": {
+                                    "description": "SAID of the endorsement being revoked",
+                                    "type": "string"
+                                },
+                                "s": {
+                                    "description": "Schema SAID of the endorsement",
+                                    "type": "string"
+                                }
+                            },
+                            "required": ["n", "s"]
+                        }
+                    },
+                    "additionalProperties": false,
+                    "required": ["d", "endorsement"]
+                }
+            ]
+        }
+    },
+    "additionalProperties": false,
+    "required": [
+        "v",
+        "d",
+        "i",
+        "ri",
+        "s",
+        "a",
+        "e"
+    ]
+}

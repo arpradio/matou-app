@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls:*)",
+      "Bash(find:*)",
+      "Bash(grep:*)",
+      "WebSearch",
+      "WebFetch(domain:www.ietf.org)",
+      "WebFetch(domain:github.com)",
+      "Bash(cat:*)"
+    ]
+  }
+}
