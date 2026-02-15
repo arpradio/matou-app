@@ -143,6 +143,9 @@
         v-if="selectedMember"
         :sharedProfile="selectedMember.shared"
         :communityProfile="selectedMember.community"
+        :memberAid="selectedMember.memberAid"
+        :membershipSaid="selectedMember.membershipSaid"
+        :memberOobi="selectedMember.memberOobi"
         @close="selectedMember = null"
       />
     </Teleport>
@@ -195,7 +198,13 @@ const profilesStore = useProfilesStore();
 const isRefreshing = ref(false);
 const adminSectionRef = ref<InstanceType<typeof AdminSection> | null>(null);
 const showInviteModal = ref(false);
-const selectedMember = ref<{ shared?: Record<string, unknown>; community?: Record<string, unknown> } | null>(null);
+const selectedMember = ref<{
+  shared?: Record<string, unknown>;
+  community?: Record<string, unknown>;
+  memberAid?: string;
+  membershipSaid?: string;
+  memberOobi?: string;
+} | null>(null);
 
 // Dark mode state
 const isDark = ref(false);
@@ -327,7 +336,15 @@ function findCommunityProfile(sharedProfile: Record<string, unknown>): Record<st
 }
 
 function handleMemberClick(member: { profile: Record<string, unknown>; communityProfile?: Record<string, unknown> }) {
-  selectedMember.value = { shared: member.profile, community: member.communityProfile };
+  // Extract member AID and credential info for endorsements
+  const memberAid = (member.profile?.aid as string) || (member.profile?.userAID as string) || (member.communityProfile?.userAID as string);
+  const membershipSaid = (member.communityProfile?.credentialSaid as string) || (member.profile?.credentialSaid as string);
+  selectedMember.value = {
+    shared: member.profile,
+    community: member.communityProfile,
+    memberAid,
+    membershipSaid,
+  };
 }
 
 // Admin action handlers
