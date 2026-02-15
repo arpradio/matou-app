@@ -16,9 +16,27 @@ import { secureStorage } from './secureStorage';
 
 // Environment-based config URL selection
 const ENV = (import.meta.env.VITE_ENV as string) || 'dev';
+
+/**
+ * Derive a URL for LAN access - if accessed via LAN IP, substitute hostname
+ */
+function deriveLanUrl(envUrl: string | undefined, defaultPort: number): string {
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+  const isLanAccess = currentHost !== 'localhost' && currentHost !== '127.0.0.1';
+
+  if (envUrl) {
+    if (isLanAccess && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
+      return envUrl.replace(/localhost|127\.0\.0\.1/, currentHost);
+    }
+    return envUrl;
+  }
+
+  return `http://${currentHost}:${defaultPort}`;
+}
+
 const CONFIG_URLS: Record<string, string> = {
-  dev: import.meta.env.VITE_DEV_CONFIG_URL || 'http://localhost:3904',
-  test: import.meta.env.VITE_TEST_CONFIG_URL || 'http://localhost:4904',
+  dev: deriveLanUrl(import.meta.env.VITE_DEV_CONFIG_URL as string | undefined, 3904),
+  test: deriveLanUrl(import.meta.env.VITE_TEST_CONFIG_URL as string | undefined, 4904),
   prod: import.meta.env.VITE_PROD_CONFIG_URL || '',
 };
 
@@ -153,16 +171,19 @@ async function loadCachedConfig(): Promise<ClientConfig | null> {
 }
 
 function getDefaultConfig(): ClientConfig {
+  // Derive URLs based on current hostname for LAN access support
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
+
   return {
     version: '1.0',
     mode: 'dev',
     keri: {
-      admin_url: 'http://localhost:3901',
-      boot_url: 'http://localhost:3903',
-      cesr_url: 'http://localhost:3902',
+      admin_url: `http://${currentHost}:3901`,
+      boot_url: `http://${currentHost}:3903`,
+      cesr_url: `http://${currentHost}:3902`,
     },
-    schema_server_url: 'http://localhost:7723',
-    config_server_url: 'http://localhost:3904',
+    schema_server_url: `http://${currentHost}:7723`,
+    config_server_url: `http://${currentHost}:3904`,
     witnesses: {
       urls: [],
       aids: {},

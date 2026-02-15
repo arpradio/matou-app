@@ -69,7 +69,7 @@ export async function getBackendUrl(): Promise<string> {
   }
 
   // Browser and Cordova: derive from current hostname for LAN support
-  cachedBackendUrl = deriveBackendUrl(import.meta.env.VITE_BACKEND_URL as string | undefined, 8080);
+  cachedBackendUrl = deriveBackendUrl(import.meta.env.VITE_BACKEND_URL as string | undefined, 4000);
   return cachedBackendUrl;
 }
 
@@ -79,5 +79,7 @@ export async function getBackendUrl(): Promise<string> {
  */
 export function getBackendUrlSync(): string {
   if (cachedBackendUrl) return cachedBackendUrl;
-  return deriveBackendUrl(import.meta.env.VITE_BACKEND_URL as string | undefined, 8080);
+  // Cache the derived URL for consistency with getBackendUrl()
+  cachedBackendUrl = deriveBackendUrl(import.meta.env.VITE_BACKEND_URL as string | undefined, 4000);
+  return cachedBackendUrl;
 }
