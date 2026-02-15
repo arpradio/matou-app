@@ -103,13 +103,13 @@ func Load(configPath, bootstrapPath string) (*Config, error) {
 	cfg := &Config{
 		// Default values
 		Server: ServerConfig{
-			Host: "localhost",
+			Host: "192.168.0.42",
 			Port: 8080,
 		},
 		KERI: KERIConfig{
-			AdminURL: "http://localhost:3901",
-			BootURL:  "http://localhost:3903",
-			CESRURL:  "http://localhost:3902",
+			AdminURL: "http://192.168.0.42:3901",
+			BootURL:  "http://192.168.0.42:3903",
+			CESRURL:  "http://192.168.0.42:3902",
 		},
 		AnySync: AnySyncConfig{
 			ClientConfigPath: "config/client.yml",

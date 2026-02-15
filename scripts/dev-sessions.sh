@@ -148,12 +148,12 @@ start_frontend() {
         fi
     fi
 
-    log_info "Starting frontend session $session on port $port (backend: http://${host_ip}:$backend_port)"
+    log_info "Starting frontend session $session on port $port (backend: http://localhost:$backend_port)"
 
     # Start in subshell with proper working directory
     (
         cd "$FRONTEND_DIR"
-        VITE_BACKEND_URL="http://${host_ip}:$backend_port" \
+        VITE_BACKEND_URL="http://localhost:$backend_port" \
         exec npm run dev -- --port "$port" --host
     ) > "$log_file" 2>&1 &
 
