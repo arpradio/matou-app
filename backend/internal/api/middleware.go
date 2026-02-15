@@ -28,28 +28,55 @@ func isAllowedOrigin(origin string) bool {
 		return isBundledOrigin(origin)
 	}
 
-	// Default dev mode: fixed list
-	devOrigins := []string{
-		"http://localhost:9000",  // Quasar dev server
-		"http://localhost:9300",  // Electron dev server
-		"http://127.0.0.1:9000",
-		"http://127.0.0.1:9300",
-	}
-	for _, allowed := range devOrigins {
-		if origin == allowed {
-			return true
-		}
+	// --- Development mode ---
+	// Explicit dev origins
+	devOrigins := map[string]bool{
+		"http://localhost:9000": true, // Quasar dev
+		"http://localhost:9300": true, // Electron dev
+		"http://127.0.0.1:9000": true,
+		"http://127.0.0.1:9300": true,
 	}
 
-	if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") {
+	if devOrigins[origin] {
 		return true
 	}
 
-	if strings.HasPrefix(origin, "http://192.168.")  {
+	// Allow any localhost port
+	if strings.HasPrefix(origin, "http://localhost:") ||
+		strings.HasPrefix(origin, "http://127.0.0.1:") {
+		return true
+	}
+
+	// Allow LAN origins in a standard /24 subnet (192.168.x.x)
+	// This avoids accidentally allowing 10.x.x.x or 172.16.x.x
+	if isLANOrigin(origin) {
 		return true
 	}
 
 	return false
+}
+
+func isLANOrigin(origin string) bool {
+	// Expected format: http://192.168.X.Y:PORT
+	if !strings.HasPrefix(origin, "http://192.168.") {
+		return false
+	}
+
+	// Optional: deeper validation
+	// Extract host portion
+	u, err := url.Parse(origin)
+	if err != nil {
+		return false
+	}
+
+	ip := net.ParseIP(u.Hostname())
+	if ip == nil {
+		return false
+	}
+
+	// Check if it's in 192.168.0.0/16
+	_, lanNet, _ := net.ParseCIDR("192.168.0.0/16")
+	return lanNet.Contains(ip)
 }
 
 // CORSMiddleware adds CORS headers for frontend development and bundled apps.
