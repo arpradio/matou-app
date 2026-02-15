@@ -94,9 +94,11 @@ start_backend() {
     log_info "Starting backend session $session on port $port (data: $data_dir)"
 
     # Start Go backend in subshell with proper working directory
+    # Bind to 0.0.0.0 for LAN access
     (
         cd "$BACKEND_DIR"
         MATOU_DATA_DIR="$data_dir" \
+        MATOU_SERVER_HOST="0.0.0.0" \
         MATOU_SERVER_PORT="$port" \
         exec go run ./cmd/server
     ) > "$log_file" 2>&1 &
@@ -141,19 +143,30 @@ start_frontend() {
 
     # Detect host IP for LAN access (use localhost as fallback)
     local host_ip="${MATOU_HOST_IP:-localhost}"
-    if [ "$host_ip" = "localhost" ] && command -v hostname &> /dev/null; then
-        local detected_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-        if [ -n "$detected_ip" ]; then
-            host_ip="$detected_ip"
+    if [ "$host_ip" = "localhost" ]; then
+        # Try Linux/Mac method first
+        if command -v hostname &> /dev/null; then
+            local detected_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+            if [ -n "$detected_ip" ]; then
+                host_ip="$detected_ip"
+            fi
+        fi
+        # Windows fallback (Git Bash / WSL)
+        if [ "$host_ip" = "localhost" ] && command -v ipconfig.exe &> /dev/null; then
+            local detected_ip=$(ipconfig.exe 2>/dev/null | grep -A 5 "Ethernet\|Wi-Fi" | grep "IPv4" | head -1 | awk -F: '{print $2}' | tr -d ' \r')
+            if [ -n "$detected_ip" ]; then
+                host_ip="$detected_ip"
+            fi
         fi
     fi
 
-    log_info "Starting frontend session $session on port $port (backend: http://localhost:$backend_port)"
+    log_info "Starting frontend session $session on port $port (backend: http://$host_ip:$backend_port)"
 
     # Start in subshell with proper working directory
+    # Use detected host_ip for backend URL so LAN access works
     (
         cd "$FRONTEND_DIR"
-        VITE_BACKEND_URL="http://localhost:$backend_port" \
+        VITE_BACKEND_URL="http://$host_ip:$backend_port" \
         exec npm run dev -- --port "$port" --host
     ) > "$log_file" 2>&1 &
 

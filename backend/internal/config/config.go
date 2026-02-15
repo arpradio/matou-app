@@ -140,6 +140,11 @@ func Load(configPath, bootstrapPath string) (*Config, error) {
 		}
 	}
 
+	// Apply server env var overrides
+	if host := os.Getenv("MATOU_SERVER_HOST"); host != "" {
+		cfg.Server.Host = host
+	}
+
 	// Apply SMTP env var overrides
 	if host := os.Getenv("MATOU_SMTP_HOST"); host != "" {
 		cfg.SMTP.Host = host
