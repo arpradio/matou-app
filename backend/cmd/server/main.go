@@ -345,6 +345,7 @@ func main() {
 	eventsHandler := api.NewEventsHandler(eventBroker)
 	profilesHandler := api.NewProfilesHandler(spaceManager, userIdentity, typeRegistry)
 	filesHandler := api.NewFilesHandler(spaceManager.FileManager(), spaceManager)
+	endorsementsHandler := api.NewEndorsementsHandler(store)
 
 	// Create HTTP server
 	mux := http.NewServeMux()
@@ -391,6 +392,7 @@ func main() {
 	profilesHandler.RegisterRoutes(mux)
 	filesHandler.RegisterRoutes(mux)
 	notificationsHandler.RegisterRoutes(mux)
+	endorsementsHandler.RegisterRoutes(mux)
 	orgConfigHandler.RegisterRoutes(mux)
 
 	// Start server
@@ -458,6 +460,12 @@ func main() {
 	fmt.Println("  Events:")
 	fmt.Println("  GET  /api/v1/events                   - SSE event stream")
 	fmt.Println()
+	fmt.Println()
+	fmt.Println("  Endorsements:")
+	fmt.Println("  GET  /api/v1/endorsements/{aid}          - Get endorsements for member")
+	fmt.Println("  GET  /api/v1/endorsements/issued/{aid}   - Get endorsements issued by")
+	fmt.Println("  POST /api/v1/endorsements/sync           - Sync endorsement from frontend")
+	fmt.Println("  POST /api/v1/endorsements/revoke         - Mark endorsement revoked")
 	fmt.Println("  Org Config:")
 	fmt.Println("  GET  /api/v1/org/config               - Get org configuration")
 	fmt.Println("  POST /api/v1/org/config               - Save org configuration")

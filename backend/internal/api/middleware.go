@@ -22,8 +22,6 @@ func isBundledOrigin(origin string) bool {
 	return false
 }
 
-// isAllowedOrigin checks whether the origin should get CORS headers,
-// respecting the MATOU_CORS_MODE env var ("bundled" or default "dev").
 func isAllowedOrigin(origin string) bool {
 	mode := os.Getenv("MATOU_CORS_MODE")
 	if mode == "bundled" {
@@ -43,8 +41,11 @@ func isAllowedOrigin(origin string) bool {
 		}
 	}
 
-	// Also allow any localhost in dev (convenient for dynamic ports)
 	if strings.HasPrefix(origin, "http://localhost:") || strings.HasPrefix(origin, "http://127.0.0.1:") {
+		return true
+	}
+
+	if strings.HasPrefix(origin, "http://192.168.")  {
 		return true
 	}
 

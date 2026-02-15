@@ -7,7 +7,12 @@
       "WebSearch",
       "WebFetch(domain:www.ietf.org)",
       "WebFetch(domain:github.com)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(npx vue-tsc:*)",
+      "Bash(go build:*)",
+      "Bash(wsl -e bash -c \"cd /home/sudoscientist/matou/app/backend && go build ./...\":*)",
+      "Bash(wsl -e bash -c 'grep -n \"\"Org Config:\"\" /home/sudoscientist/matou/app/backend/cmd/server/main.go')",
+      "Bash(wsl -e bash -c \"cd /home/sudoscientist/matou/app/backend && go test:*)"
     ]
   }
 }

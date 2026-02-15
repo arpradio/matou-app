@@ -81,7 +81,8 @@ const (
 	CollectionUserPreferences  = "user_preferences"
 	CollectionKELCache         = "kel_cache"
 	CollectionSyncIndex        = "sync_index"
-	CollectionSpaces           = "spaces"
+	CollectionSpaces            = "spaces"
+	CollectionEndorsementsCache = "endorsements_cache"
 )
 
 // CredentialsCache returns the credentials cache collection.
@@ -494,4 +495,191 @@ func (s *LocalStore) SaveSpace(ctx context.Context, record *SpaceRecord) error {
 // ListAllSpaces is a convenience method that lists all spaces
 func (s *LocalStore) ListAllSpaces(ctx context.Context) ([]*SpaceRecord, error) {
 	return s.ListAllSpaceRecords(ctx)
+}
+
+// CachedEndorsement represents a cached endorsement credential.
+type CachedEndorsement struct {
+	SAID             string    `json:"id"`               // SAID (used as document ID)
+	EndorserAID      string    `json:"endorserAid"`
+	EndorserName     string    `json:"endorserName,omitempty"`
+	EndorseeAID      string    `json:"endorseeAid"`
+	EndorseeName     string    `json:"endorseeName,omitempty"`
+	EndorsementType  string    `json:"endorsementType"`
+	Category         string    `json:"category,omitempty"`
+	Claim            string    `json:"claim"`
+	Evidence         string    `json:"evidence,omitempty"`
+	Confidence       string    `json:"confidence"`
+	Relationship     string    `json:"relationship,omitempty"`
+	MembershipSAID   string    `json:"membershipSaid"`
+	IssuedAt         string    `json:"issuedAt"`
+	Revoked          bool      `json:"revoked,omitempty"`
+	RevokedAt        string    `json:"revokedAt,omitempty"`
+	RevocationReason string    `json:"revocationReason,omitempty"`
+	RevocationSAID   string    `json:"revocationSaid,omitempty"`
+	CachedAt         time.Time `json:"cachedAt"`
+}
+
+// EndorsementsCache returns the endorsements cache collection.
+func (s *LocalStore) EndorsementsCache(ctx context.Context) (anystore.Collection, error) {
+	return s.db.Collection(ctx, CollectionEndorsementsCache)
+}
+
+// StoreEndorsement caches an endorsement locally.
+func (s *LocalStore) StoreEndorsement(ctx context.Context, endorsement *CachedEndorsement) error {
+	coll, err := s.EndorsementsCache(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get endorsements collection: %w", err)
+	}
+
+	data, err := json.Marshal(endorsement)
+	if err != nil {
+		return fmt.Errorf("failed to marshal endorsement: %w", err)
+	}
+
+	doc := anyenc.MustParseJson(string(data))
+	return coll.UpsertOne(ctx, doc)
+}
+
+// GetEndorsement retrieves a cached endorsement by SAID.
+func (s *LocalStore) GetEndorsement(ctx context.Context, said string) (*CachedEndorsement, error) {
+	coll, err := s.EndorsementsCache(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get endorsements collection: %w", err)
+	}
+
+	doc, err := coll.FindId(ctx, said)
+	if err != nil {
+		return nil, fmt.Errorf("endorsement not found: %w", err)
+	}
+
+	var endorsement CachedEndorsement
+	if err := json.Unmarshal([]byte(doc.Value().String()), &endorsement); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal endorsement: %w", err)
+	}
+
+	return &endorsement, nil
+}
+
+// GetEndorsementsForMember retrieves all endorsements where the member is the endorsee.
+func (s *LocalStore) GetEndorsementsForMember(ctx context.Context, memberAID string) ([]*CachedEndorsement, error) {
+	coll, err := s.EndorsementsCache(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get endorsements collection: %w", err)
+	}
+
+	query := anyenc.MustParseJson(fmt.Sprintf(`{"endorseeAid": "%s"}`, memberAID))
+
+	iter, err := coll.Find(query).Iter(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query endorsements: %w", err)
+	}
+	defer iter.Close()
+
+	var endorsements []*CachedEndorsement
+	for iter.Next() {
+		doc, err := iter.Doc()
+		if err != nil {
+			continue
+		}
+
+		var endorsement CachedEndorsement
+		if err := json.Unmarshal([]byte(doc.Value().String()), &endorsement); err != nil {
+			continue
+		}
+		endorsements = append(endorsements, &endorsement)
+	}
+
+	return endorsements, nil
+}
+
+// GetEndorsementsIssuedBy retrieves all endorsements issued by a specific AID.
+func (s *LocalStore) GetEndorsementsIssuedBy(ctx context.Context, endorserAID string) ([]*CachedEndorsement, error) {
+	coll, err := s.EndorsementsCache(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get endorsements collection: %w", err)
+	}
+
+	query := anyenc.MustParseJson(fmt.Sprintf(`{"endorserAid": "%s"}`, endorserAID))
+
+	iter, err := coll.Find(query).Iter(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query endorsements: %w", err)
+	}
+	defer iter.Close()
+
+	var endorsements []*CachedEndorsement
+	for iter.Next() {
+		doc, err := iter.Doc()
+		if err != nil {
+			continue
+		}
+
+		var endorsement CachedEndorsement
+		if err := json.Unmarshal([]byte(doc.Value().String()), &endorsement); err != nil {
+			continue
+		}
+		endorsements = append(endorsements, &endorsement)
+	}
+
+	return endorsements, nil
+}
+
+// RevokeEndorsement marks an endorsement as revoked.
+func (s *LocalStore) RevokeEndorsement(ctx context.Context, endorsementSAID, revocationSAID, reason, revokedAt string) error {
+	endorsement, err := s.GetEndorsement(ctx, endorsementSAID)
+	if err != nil {
+		return err
+	}
+
+	endorsement.Revoked = true
+	endorsement.RevokedAt = revokedAt
+	endorsement.RevocationReason = reason
+	endorsement.RevocationSAID = revocationSAID
+
+	return s.StoreEndorsement(ctx, endorsement)
+}
+
+// GetAllEndorsements retrieves all cached endorsements.
+func (s *LocalStore) GetAllEndorsements(ctx context.Context) ([]*CachedEndorsement, error) {
+	coll, err := s.EndorsementsCache(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get endorsements collection: %w", err)
+	}
+
+	iter, err := coll.Find(nil).Iter(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query endorsements: %w", err)
+	}
+	defer iter.Close()
+
+	var endorsements []*CachedEndorsement
+	for iter.Next() {
+		doc, err := iter.Doc()
+		if err != nil {
+			continue
+		}
+
+		var endorsement CachedEndorsement
+		if err := json.Unmarshal([]byte(doc.Value().String()), &endorsement); err != nil {
+			continue
+		}
+		endorsements = append(endorsements, &endorsement)
+	}
+
+	return endorsements, nil
+}
+
+// CountEndorsements returns the count of cached endorsements.
+func (s *LocalStore) CountEndorsements(ctx context.Context) (int, error) {
+	coll, err := s.EndorsementsCache(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get endorsements collection: %w", err)
+	}
+
+	count, err := coll.Count(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("failed to count endorsements: %w", err)
+	}
+
+	return int(count), nil
 }
