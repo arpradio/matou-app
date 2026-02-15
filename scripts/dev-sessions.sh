@@ -139,13 +139,22 @@ start_frontend() {
         return 0
     fi
 
-    log_info "Starting frontend session $session on port $port (backend: http://localhost:$backend_port)"
+    # Detect host IP for LAN access (use localhost as fallback)
+    local host_ip="${MATOU_HOST_IP:-localhost}"
+    if [ "$host_ip" = "localhost" ] && command -v hostname &> /dev/null; then
+        local detected_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+        if [ -n "$detected_ip" ]; then
+            host_ip="$detected_ip"
+        fi
+    fi
+
+    log_info "Starting frontend session $session on port $port (backend: http://${host_ip}:$backend_port)"
 
     # Start in subshell with proper working directory
     (
         cd "$FRONTEND_DIR"
-        VITE_BACKEND_URL="http://localhost:$backend_port" \
-        exec npm run dev -- --port "$port"
+        VITE_BACKEND_URL="http://${host_ip}:$backend_port" \
+        exec npm run dev -- --port "$port" --host
     ) > "$log_file" 2>&1 &
 
     local pid=$!
