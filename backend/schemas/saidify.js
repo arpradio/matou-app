@@ -3,7 +3,10 @@
  * SAIDify Schema Files
  *
  * Computes the SAID (Self-Addressing IDentifier) for KERI/ACDC schema files.
- * Uses Blake3 hashing with base64url encoding.
+ * Uses SHA-256 hashing with CESR base64url encoding.
+ *
+ * IMPORTANT: KERI requires the JSON to be serialized in the EXACT field order
+ * as it appears in the file, with the $id replaced by a placeholder.
  *
  * Usage: node saidify.js <schema-file.json>
  * Or:    node saidify.js --all  (to process all schema files)
@@ -13,11 +16,37 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-// SAID placeholder - 44 characters (same length as final SAID)
+// SAID placeholder - 44 '#' characters (same length as final SAID)
 const SAID_PLACEHOLDER = '#'.repeat(44);
 
 /**
- * Base64url encode a buffer
+ * Recursively serialize JSON preserving key order as they appear in the object.
+ * This is critical for KERI SAID computation.
+ */
+function canonicalJsonStringify(obj) {
+  if (obj === null) return 'null';
+  if (typeof obj === 'boolean') return obj ? 'true' : 'false';
+  if (typeof obj === 'number') return String(obj);
+  if (typeof obj === 'string') return JSON.stringify(obj);
+
+  if (Array.isArray(obj)) {
+    const items = obj.map(item => canonicalJsonStringify(item));
+    return '[' + items.join(',') + ']';
+  }
+
+  if (typeof obj === 'object') {
+    // Preserve insertion order (as Object.keys does in modern JS)
+    const pairs = Object.keys(obj).map(key => {
+      return JSON.stringify(key) + ':' + canonicalJsonStringify(obj[key]);
+    });
+    return '{' + pairs.join(',') + '}';
+  }
+
+  return String(obj);
+}
+
+/**
+ * Base64url encode a buffer (no padding)
  */
 function base64urlEncode(buffer) {
   return buffer
@@ -28,38 +57,64 @@ function base64urlEncode(buffer) {
 }
 
 /**
- * Compute SAID using Blake3 (or fallback to SHA-256)
- * KERI uses Blake3, but we fallback to SHA-256 for compatibility
+ * Compute SAID using SHA-256
+ * Returns a 44-character SAID: 'E' prefix + 43 chars base64url
  */
-function computeSAID(jsonStr) {
-  // Try Blake3 first (if available), otherwise use SHA-256
-  let hash;
-  try {
-    // Blake3 would be preferred, but SHA-256 is compatible with KERI's SHA-256 variant
-    hash = crypto.createHash('sha256').update(jsonStr, 'utf8').digest();
-  } catch {
-    hash = crypto.createHash('sha256').update(jsonStr, 'utf8').digest();
-  }
-
-  // KERI SAID format: 'E' prefix for SHA-256/Blake3-256
-  return 'E' + base64urlEncode(hash).slice(0, 43);
+function computeSAID(jsonBytes) {
+  const hash = crypto.createHash('sha256').update(jsonBytes).digest();
+  // KERI SAID format: 'E' prefix indicates SHA-256 (Matter code)
+  // The hash is 32 bytes = 256 bits, base64url encodes to 43 chars
+  return 'E' + base64urlEncode(hash);
 }
 
 /**
- * SAIDify a schema object
+ * Parse JSON while preserving key order
+ * Returns the parsed object with keys in their original order
+ */
+function parseJsonPreservingOrder(jsonStr) {
+  // JSON.parse in modern JS preserves insertion order for objects
+  return JSON.parse(jsonStr);
+}
+
+/**
+ * Replace $id with placeholder while preserving structure
+ */
+function replaceIdWithPlaceholder(obj) {
+  if (typeof obj !== 'object' || obj === null) return obj;
+
+  if (Array.isArray(obj)) {
+    return obj.map(item => replaceIdWithPlaceholder(item));
+  }
+
+  const result = {};
+  for (const key of Object.keys(obj)) {
+    if (key === '$id') {
+      result[key] = SAID_PLACEHOLDER;
+    } else {
+      result[key] = replaceIdWithPlaceholder(obj[key]);
+    }
+  }
+  return result;
+}
+
+/**
+ * SAIDify a schema - compute its SAID
  */
 function saidifySchema(schema) {
   // Replace $id with placeholder
-  const schemaWithPlaceholder = { ...schema, $id: SAID_PLACEHOLDER };
+  const schemaWithPlaceholder = replaceIdWithPlaceholder(schema);
 
-  // Serialize to JSON (compact, no extra whitespace, sorted keys)
-  const jsonStr = JSON.stringify(schemaWithPlaceholder, Object.keys(schemaWithPlaceholder).sort());
+  // Serialize to compact JSON (preserving field order)
+  const jsonStr = canonicalJsonStringify(schemaWithPlaceholder);
 
-  // Compute SAID
-  const said = computeSAID(jsonStr);
+  // Compute SAID from UTF-8 bytes
+  const jsonBytes = Buffer.from(jsonStr, 'utf8');
+  const said = computeSAID(jsonBytes);
 
-  // Return schema with computed SAID
-  return { ...schema, $id: said };
+  // Return original schema structure with computed SAID
+  const result = { ...schema };
+  result.$id = said;
+  return result;
 }
 
 /**
@@ -68,9 +123,9 @@ function saidifySchema(schema) {
 function processSchemaFile(filePath) {
   console.log(`Processing: ${filePath}`);
 
-  // Read schema
+  // Read and parse schema (preserving key order)
   const content = fs.readFileSync(filePath, 'utf8');
-  const schema = JSON.parse(content);
+  const schema = parseJsonPreservingOrder(content);
 
   const oldId = schema.$id;
 
@@ -80,14 +135,20 @@ function processSchemaFile(filePath) {
   console.log(`  Old $id: ${oldId}`);
   console.log(`  New $id: ${saidifiedSchema.$id}`);
 
-  // Write back with pretty formatting
-  fs.writeFileSync(filePath, JSON.stringify(saidifiedSchema, null, 4) + '\n');
+  if (oldId === saidifiedSchema.$id) {
+    console.log('  (no change)');
+  } else {
+    // Write back with proper formatting (2-space indent, preserve key order)
+    const output = JSON.stringify(saidifiedSchema, null, 4) + '\n';
+    fs.writeFileSync(filePath, output);
+    console.log('  Updated!');
+  }
 
   return saidifiedSchema.$id;
 }
 
 /**
- * Find all schema files in the current directory
+ * Find all schema files in the directory
  */
 function findSchemaFiles(dir) {
   return fs.readdirSync(dir)
@@ -103,7 +164,8 @@ if (args.length === 0 || args[0] === '--help') {
   console.log('Usage: node saidify.js <schema-file.json>');
   console.log('       node saidify.js --all');
   console.log('');
-  console.log('SAIDifies KERI/ACDC schema files by computing their $id SAID.');
+  console.log('Computes KERI SAIDs for schema files.');
+  console.log('The $id field is replaced with the computed SAID.');
   process.exit(0);
 }
 
@@ -126,7 +188,7 @@ if (args[0] === '--all') {
   results[name] = said;
 }
 
-console.log('\n=== SAIDs for frontend/backend code ===\n');
+console.log('\n=== SAIDs for code ===\n');
 for (const [name, said] of Object.entries(results)) {
   const constName = name
     .replace('matou-', '')

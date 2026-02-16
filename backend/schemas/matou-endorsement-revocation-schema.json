@@ -1,5 +1,5 @@
 {
-    "$id": "ETsdvysaC0FapPtkyUc58C2DrS1joieXa6-TW7I0VyxI",
+    "$id": "ECTr_8xypBFYjSIwJkJ5OwD-PUb-8eceHIKc-vZh_BDK",
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "MATOU Endorsement Revocation",
     "description": "A credential revoking a previous endorsement",
