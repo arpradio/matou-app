@@ -95,11 +95,13 @@ start_backend() {
 
     # Start Go backend in subshell with proper working directory
     # Bind to 0.0.0.0 for LAN access
+    # MATOU_INFRA_HOST specifies where infrastructure (KERI, any-sync nodes) runs
     (
         cd "$BACKEND_DIR"
         MATOU_DATA_DIR="$data_dir" \
         MATOU_SERVER_HOST="0.0.0.0" \
         MATOU_SERVER_PORT="$port" \
+        MATOU_INFRA_HOST="${MATOU_INFRA_HOST:-localhost}" \
         exec go run ./cmd/server
     ) > "$log_file" 2>&1 &
 
@@ -160,13 +162,18 @@ start_frontend() {
         fi
     fi
 
-    log_info "Starting frontend session $session on port $port (backend: http://$host_ip:$backend_port)"
+    # Infrastructure host (for config server, KERI, etc.)
+    local infra_host="${MATOU_INFRA_HOST:-$host_ip}"
+
+    log_info "Starting frontend session $session on port $port (backend: http://$host_ip:$backend_port, infra: $infra_host)"
 
     # Start in subshell with proper working directory
     # Use detected host_ip for backend URL so LAN access works
+    # Use MATOU_INFRA_HOST for config server URL (where infrastructure runs)
     (
         cd "$FRONTEND_DIR"
         VITE_BACKEND_URL="http://$host_ip:$backend_port" \
+        VITE_DEV_CONFIG_URL="http://$infra_host:3904" \
         exec npm run dev -- --port "$port" --host
     ) > "$log_file" 2>&1 &
 
@@ -192,6 +199,8 @@ start_sessions() {
     echo "========================================"
     echo "  Starting $num_sessions dev session(s)"
     echo "========================================"
+    echo ""
+    echo "  Infrastructure host: ${MATOU_INFRA_HOST:-localhost}"
     echo ""
 
     for ((i=1; i<=num_sessions; i++)); do
@@ -392,6 +401,14 @@ case "${1:-}" in
         echo "  Session 1: Frontend :5100, Backend :4000 (data: ./data)"
         echo "  Session 2: Frontend :5101, Backend :4001 (data: ./data2)"
         echo "  Session N: Frontend :510(N-1), Backend :400(N-1) (data: ./dataN)"
+        echo ""
+        echo "Environment variables:"
+        echo "  MATOU_INFRA_HOST    IP where infrastructure runs (KERI, any-sync nodes)"
+        echo "                      Default: localhost"
+        echo "  MATOU_HOST_IP       IP for frontend to reach backend (auto-detected)"
+        echo ""
+        echo "Example (infrastructure on another machine):"
+        echo "  MATOU_INFRA_HOST=192.168.0.42 $0 2"
         echo ""
         exit 1
         ;;
