@@ -13,6 +13,11 @@ const ENDORSEMENT_SCHEMA_SAID = 'ESy4fT0P9b-HiY5nbi0p4tIlEGI2FBLckTY5-wL9ZpTo';
 const REVOCATION_SCHEMA_SAID = 'ETsdvysaC0FapPtkyUc58C2DrS1joieXa6-TW7I0VyxI';
 const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
 
+// Schema server URL as seen by KERIA inside Docker (fixed internal hostname)
+const SCHEMA_SERVER_URL = 'http://schema-server:7723';
+const ENDORSEMENT_SCHEMA_OOBI = `${SCHEMA_SERVER_URL}/oobi/${ENDORSEMENT_SCHEMA_SAID}`;
+const REVOCATION_SCHEMA_OOBI = `${SCHEMA_SERVER_URL}/oobi/${REVOCATION_SCHEMA_SAID}`;
+
 // Endorsement types
 export const EndorsementType = {
   IDENTITY_VERIFICATION: 'identity_verification',
@@ -171,6 +176,16 @@ export function useEndorsements() {
       // Get registry ID
       const registryId = await getRegistryId();
 
+      // Resolve endorsement schema OOBI (required before issuing)
+      console.log('[Endorsements] Resolving endorsement schema OOBI...');
+      try {
+        await keriClient.resolveOOBI(ENDORSEMENT_SCHEMA_OOBI, ENDORSEMENT_SCHEMA_SAID, 15000);
+        console.log('[Endorsements] Endorsement schema OOBI resolved');
+      } catch (schemaErr) {
+        console.warn('[Endorsements] Schema OOBI resolution issue:', schemaErr);
+        // Continue anyway - KERIA might already have it cached
+      }
+
       // Resolve endorsee OOBI if provided
       if (params.endorseeOobi) {
         try {
@@ -303,6 +318,16 @@ export function useEndorsements() {
 
       // Get registry ID
       const registryId = await getRegistryId();
+
+      // Resolve revocation schema OOBI (required before issuing)
+      console.log('[Endorsements] Resolving revocation schema OOBI...');
+      try {
+        await keriClient.resolveOOBI(REVOCATION_SCHEMA_OOBI, REVOCATION_SCHEMA_SAID, 15000);
+        console.log('[Endorsements] Revocation schema OOBI resolved');
+      } catch (schemaErr) {
+        console.warn('[Endorsements] Revocation schema OOBI resolution issue:', schemaErr);
+        // Continue anyway - KERIA might already have it cached
+      }
 
       const revokerAidName = currentAID.value.name;
       const dt = new Date().toISOString();
