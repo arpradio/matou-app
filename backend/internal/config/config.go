@@ -100,16 +100,22 @@ type AccessControlConfig struct {
 // Load reads configuration from files and environment.
 // bootstrapPath is now optional - org config is loaded from dataDir/org-config.yaml.
 func Load(configPath, bootstrapPath string) (*Config, error) {
+	// MATOU_INFRA_HOST specifies where infrastructure services run (default: localhost)
+	infraHost := os.Getenv("MATOU_INFRA_HOST")
+	if infraHost == "" {
+		infraHost = "localhost"
+	}
+
 	cfg := &Config{
-		// Default values
+		// Default values - derived from MATOU_INFRA_HOST
 		Server: ServerConfig{
-			Host: "192.168.0.42",
+			Host: "0.0.0.0", // Bind to all interfaces by default
 			Port: 8080,
 		},
 		KERI: KERIConfig{
-			AdminURL: "http://192.168.0.42:3901",
-			BootURL:  "http://192.168.0.42:3903",
-			CESRURL:  "http://192.168.0.42:3902",
+			AdminURL: fmt.Sprintf("http://%s:3901", infraHost),
+			BootURL:  fmt.Sprintf("http://%s:3903", infraHost),
+			CESRURL:  fmt.Sprintf("http://%s:3902", infraHost),
 		},
 		AnySync: AnySyncConfig{
 			ClientConfigPath: "config/client.yml",

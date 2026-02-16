@@ -188,13 +188,18 @@ func main() {
 	if _, err := os.Stat(anysyncConfigPath); os.IsNotExist(err) {
 		configServerURL := os.Getenv("MATOU_CONFIG_SERVER_URL")
 		if configServerURL == "" {
+			// MATOU_INFRA_HOST allows specifying where infrastructure runs (default: localhost)
+			infraHost := os.Getenv("MATOU_INFRA_HOST")
+			if infraHost == "" {
+				infraHost = "localhost"
+			}
 			switch {
 			case isTest:
-				configServerURL = "http://localhost:4904"
+				configServerURL = fmt.Sprintf("http://%s:4904", infraHost)
 			case isProd:
 				log.Fatalf("any-sync config file not found at %s and MATOU_CONFIG_SERVER_URL is not set for production", anysyncConfigPath)
 			default:
-				configServerURL = "http://localhost:3904"
+				configServerURL = fmt.Sprintf("http://%s:3904", infraHost)
 			}
 		}
 		fmt.Printf("  Config file %s not found, fetching from config server %s...\n", anysyncConfigPath, configServerURL)
