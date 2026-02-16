@@ -328,7 +328,7 @@ async function submitEndorsement() {
 }
 
 .modal-container {
-  background: var(--color-surface, #1a1a2e);
+  background: var(--color-surface, #064657);
   border: 1px solid var(--color-border, #093d46);
   border-radius: 12px;
   width: 100%;
