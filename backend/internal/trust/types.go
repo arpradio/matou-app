@@ -176,9 +176,9 @@ func SchemaToEdgeType(schema string) string {
 		return EdgeTypeInvitation
 	case "ESelfClaimSchemaV1":
 		return EdgeTypeSelfClaim
-	case "EMatouEndorsementSchemaV1":
+	case "ESy4fT0P9b-HiY5nbi0p4tIlEGI2FBLckTY5-wL9ZpTo":
 		return EdgeTypeEndorsement
-	case "EMatouEndorsementRevocationSchemaV1":
+	case "ETsdvysaC0FapPtkyUc58C2DrS1joieXa6-TW7I0VyxI":
 		return EdgeTypeRevocation
 	default:
 		return "unknown"

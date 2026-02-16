@@ -8,8 +8,9 @@ import { useIdentityStore } from 'stores/identity';
 import { useEndorsementsStore } from 'stores/endorsements';
 import type { Endorsement } from './useEndorsements';
 
-const ENDORSEMENT_SCHEMA_SAID = 'EMatouEndorsementSchemaV1';
-const REVOCATION_SCHEMA_SAID = 'EMatouEndorsementRevocationSchemaV1';
+// Schema SAIDs (computed via backend/schemas/saidify.js)
+const ENDORSEMENT_SCHEMA_SAID = 'ESy4fT0P9b-HiY5nbi0p4tIlEGI2FBLckTY5-wL9ZpTo';
+const REVOCATION_SCHEMA_SAID = 'ETsdvysaC0FapPtkyUc58C2DrS1joieXa6-TW7I0VyxI';
 
 export interface EndorsementPollingOptions {
   pollingInterval?: number; // Default: 10000ms (10 seconds)

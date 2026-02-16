@@ -1,5 +1,5 @@
 {
-    "$id": "EMatouEndorsementRevocationSchemaV1",
+    "$id": "ETsdvysaC0FapPtkyUc58C2DrS1joieXa6-TW7I0VyxI",
     "$schema": "http://json-schema.org/draft-07/schema#",
     "title": "MATOU Endorsement Revocation",
     "description": "A credential revoking a previous endorsement",
@@ -107,11 +107,17 @@
                                     "type": "string"
                                 }
                             },
-                            "required": ["n", "s"]
+                            "required": [
+                                "n",
+                                "s"
+                            ]
                         }
                     },
                     "additionalProperties": false,
-                    "required": ["d", "endorsement"]
+                    "required": [
+                        "d",
+                        "endorsement"
+                    ]
                 }
             ]
         }

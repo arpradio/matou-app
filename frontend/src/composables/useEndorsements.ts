@@ -8,9 +8,9 @@ import { useIdentityStore } from 'stores/identity';
 import { fetchOrgConfig } from 'src/api/config';
 import { BACKEND_URL } from 'src/lib/api/client';
 
-// Schema SAIDs
-const ENDORSEMENT_SCHEMA_SAID = 'EMatouEndorsementSchemaV1';
-const REVOCATION_SCHEMA_SAID = 'EMatouEndorsementRevocationSchemaV1';
+// Schema SAIDs (computed via backend/schemas/saidify.js)
+const ENDORSEMENT_SCHEMA_SAID = 'ESy4fT0P9b-HiY5nbi0p4tIlEGI2FBLckTY5-wL9ZpTo';
+const REVOCATION_SCHEMA_SAID = 'ETsdvysaC0FapPtkyUc58C2DrS1joieXa6-TW7I0VyxI';
 const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
 
 // Endorsement types
