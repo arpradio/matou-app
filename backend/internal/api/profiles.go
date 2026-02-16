@@ -389,13 +389,13 @@ func (h *ProfilesHandler) HandleInitMemberProfiles(w http.ResponseWriter, r *htt
 	// Build CommunityProfile data
 	now := time.Now().UTC().Format(time.RFC3339)
 	communityProfileData := map[string]interface{}{
-		"userAID":      req.MemberAID,
-		"credential":   req.CredentialSAID,
-		"role":         req.Role,
-		"memberSince":  now,
-		"lastActiveAt": now,
-		"credentials":  []string{req.CredentialSAID},
-		"permissions":  []string{"participate", "vote", "propose"},
+		"userAID":        req.MemberAID,
+		"credentialSaid": req.CredentialSAID,
+		"role":           req.Role,
+		"memberSince":    now,
+		"lastActiveAt":   now,
+		"credentials":    []string{req.CredentialSAID},
+		"permissions":    []string{"participate", "vote", "propose"},
 	}
 	if req.DisplayName != "" {
 		communityProfileData["displayName"] = req.DisplayName

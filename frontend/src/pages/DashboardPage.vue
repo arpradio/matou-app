@@ -338,7 +338,11 @@ function findCommunityProfile(sharedProfile: Record<string, unknown>): Record<st
 function handleMemberClick(member: { profile: Record<string, unknown>; communityProfile?: Record<string, unknown> }) {
   // Extract member AID and credential info for endorsements
   const memberAid = (member.profile?.aid as string) || (member.profile?.userAID as string) || (member.communityProfile?.userAID as string);
-  const membershipSaid = (member.communityProfile?.credentialSaid as string) || (member.profile?.credentialSaid as string);
+  // Check both credentialSaid and credential (legacy field name)
+  const membershipSaid = (member.communityProfile?.credentialSaid as string) ||
+                         (member.communityProfile?.credential as string) ||
+                         (member.profile?.credentialSaid as string) ||
+                         (member.profile?.credential as string);
   selectedMember.value = {
     shared: member.profile,
     community: member.communityProfile,

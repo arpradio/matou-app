@@ -63,6 +63,8 @@
       :endorsee-name="memberName"
       :endorsee-membership-said="membershipSaid"
       :endorsee-oobi="memberOobi"
+      :endorsee-skills="memberSkills"
+      :endorsee-interests="memberInterests"
       @close="showEndorsementModal = false"
       @success="handleEndorsementSuccess"
     />
@@ -115,6 +117,24 @@ const communityData = computed(() => {
 const memberName = computed(() => {
   const data = sharedData.value || communityData.value;
   return (data?.displayName as string) || (data?.name as string) || undefined;
+});
+
+const memberSkills = computed(() => {
+  const data = sharedData.value || communityData.value;
+  const skills = data?.skills;
+  if (typeof skills === 'string') {
+    return skills.split(',').map((s: string) => s.trim()).filter(Boolean);
+  }
+  return Array.isArray(skills) ? skills : [];
+});
+
+const memberInterests = computed(() => {
+  const data = sharedData.value || communityData.value;
+  const interests = data?.participationInterests || data?.interests;
+  if (typeof interests === 'string') {
+    return interests.split(',').map((s: string) => s.trim()).filter(Boolean);
+  }
+  return Array.isArray(interests) ? interests : [];
 });
 
 const currentUserAid = computed(() => identityStore.currentAID?.prefix);

@@ -35,11 +35,23 @@
           </div>
         </div>
 
-        <!-- Category (optional) -->
+        <!-- Skill Selection (for skill endorsements) -->
+        <div v-if="endorsementType === EndorsementType.SKILL_ENDORSEMENT && endorseeCapabilities.length > 0" class="form-field">
+          <label class="form-label">Select Skill to Endorse</label>
+          <select v-model="selectedSkill" class="form-select">
+            <option value="">Choose from {{ endorseeName || 'member' }}'s skills...</option>
+            <option v-for="skill in endorseeCapabilities" :key="skill" :value="skill">
+              {{ skill }}
+            </option>
+            <option value="__custom__">Other (custom skill)</option>
+          </select>
+        </div>
+
+        <!-- Category (optional, or required for custom skill) -->
         <div class="form-field">
           <label class="form-label">
-            Category
-            <span class="form-hint">(optional)</span>
+            {{ endorsementType === EndorsementType.SKILL_ENDORSEMENT && selectedSkill === '__custom__' ? 'Custom Skill' : 'Category' }}
+            <span v-if="selectedSkill !== '__custom__'" class="form-hint">(optional)</span>
           </label>
           <input
             v-model="category"
@@ -152,6 +164,7 @@ import {
 } from 'lucide-vue-next';
 import { useEndorsements, EndorsementType, ConfidenceLevel } from 'src/composables/useEndorsements';
 import type { EndorsementTypeValue, ConfidenceLevelValue } from 'src/composables/useEndorsements';
+import { useAdminAccess } from 'src/composables/useAdminAccess';
 
 const props = defineProps<{
   isOpen: boolean;
@@ -159,6 +172,8 @@ const props = defineProps<{
   endorseeName?: string;
   endorseeMembershipSaid: string;
   endorseeOobi?: string;
+  endorseeSkills?: string[];       // Member's declared skills
+  endorseeInterests?: string[];    // Member's participation interests
 }>();
 
 const emit = defineEmits<{
@@ -167,9 +182,11 @@ const emit = defineEmits<{
 }>();
 
 const endorsements = useEndorsements();
+const { isSteward } = useAdminAccess();
 
 // Form state
 const endorsementType = ref<EndorsementTypeValue>(EndorsementType.SKILL_ENDORSEMENT);
+const selectedSkill = ref<string>('');
 const category = ref('');
 const claim = ref('');
 const evidence = ref('');
@@ -178,13 +195,28 @@ const relationship = ref('');
 const error = ref<string | null>(null);
 const isProcessing = ref(false);
 
-// Options
-const typeOptions = [
-  { value: EndorsementType.IDENTITY_VERIFICATION, label: 'Identity', icon: ShieldCheck },
-  { value: EndorsementType.SKILL_ENDORSEMENT, label: 'Skill', icon: Award },
-  { value: EndorsementType.ROLE_COMPETENCY, label: 'Role', icon: Briefcase },
-  { value: EndorsementType.CHARACTER_REFERENCE, label: 'Character', icon: Heart },
-];
+// Combined skills/interests from endorsee's profile
+const endorseeCapabilities = computed(() => {
+  const skills = props.endorseeSkills || [];
+  const interests = props.endorseeInterests || [];
+  return [...new Set([...skills, ...interests])].filter(Boolean);
+});
+
+// Type options - Role endorsements only for admins
+const typeOptions = computed(() => {
+  const base = [
+    { value: EndorsementType.IDENTITY_VERIFICATION, label: 'Identity', icon: ShieldCheck },
+    { value: EndorsementType.SKILL_ENDORSEMENT, label: 'Skill', icon: Award },
+    { value: EndorsementType.CHARACTER_REFERENCE, label: 'Character', icon: Heart },
+  ];
+
+  // Only admins/stewards can issue role endorsements
+  if (isSteward.value) {
+    base.splice(2, 0, { value: EndorsementType.ROLE_COMPETENCY, label: 'Role', icon: Briefcase });
+  }
+
+  return base;
+});
 
 const confidenceOptions = [
   { value: ConfidenceLevel.LOW, label: 'Low' },
@@ -228,6 +260,7 @@ watch(() => props.isOpen, (isOpen) => {
 
 function resetForm() {
   endorsementType.value = EndorsementType.SKILL_ENDORSEMENT;
+  selectedSkill.value = '';
   category.value = '';
   claim.value = '';
   evidence.value = '';
@@ -235,6 +268,15 @@ function resetForm() {
   relationship.value = '';
   error.value = null;
 }
+
+// When a skill is selected, use it as the category
+watch(selectedSkill, (skill) => {
+  if (skill && skill !== '__custom__') {
+    category.value = skill;
+  } else if (skill === '__custom__') {
+    category.value = '';
+  }
+});
 
 function close() {
   emit('close');
