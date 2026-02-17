@@ -180,14 +180,15 @@ start_frontend() {
     # Infrastructure host (for config server, KERI, etc.)
     local infra_host="${MATOU_INFRA_HOST:-$host_ip}"
 
-    log_info "Starting frontend session $session on port $port (backend: http://$host_ip:$backend_port, infra: $infra_host)"
+    log_info "Starting frontend session $session on port $port (backend port: $backend_port, infra: $infra_host)"
 
     # Start in subshell with proper working directory
-    # Use detected host_ip for backend URL so LAN access works
-    # Use MATOU_INFRA_HOST for config server URL (where infrastructure runs)
+    # For LAN access: Set VITE_BACKEND_PORT instead of full URL
+    # The frontend will derive the hostname from window.location.hostname
+    # This ensures users accessing via any IP get the correct backend URL
     (
         cd "$FRONTEND_DIR"
-        VITE_BACKEND_URL="http://$host_ip:$backend_port" \
+        VITE_BACKEND_PORT="$backend_port" \
         VITE_DEV_CONFIG_URL="http://$infra_host:3904" \
         exec npm run dev -- --port "$port" --host
     ) > "$log_file" 2>&1 &

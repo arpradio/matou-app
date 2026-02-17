@@ -34,28 +34,34 @@ export function isBrowser(): boolean {
 
 /**
  * Derive backend URL from the current page's hostname.
- * If accessed via LAN IP, use that IP for backend too.
+ * Always uses window.location.hostname to ensure LAN access works.
+ * VITE_BACKEND_PORT can override the default port.
+ * VITE_BACKEND_URL can override the entire URL (for special cases).
  */
 function deriveBackendUrl(envUrl: string | undefined, defaultPort: number): string {
   // Handle SSR or missing window
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-  const isLanAccess = currentHost !== 'localhost' && currentHost !== '127.0.0.1';
+
+  // Check for port override
+  const portOverride = import.meta.env.VITE_BACKEND_PORT as string | undefined;
+  const port = portOverride ? parseInt(portOverride, 10) : defaultPort;
 
   let result: string;
 
   if (envUrl) {
-    // If env var uses localhost but we're accessed via LAN IP, substitute hostname
+    // Full URL override - still substitute hostname for LAN access
+    const isLanAccess = currentHost !== 'localhost' && currentHost !== '127.0.0.1';
     if (isLanAccess && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
       result = envUrl.replace(/localhost|127\.0\.0\.1/, currentHost);
     } else {
       result = envUrl;
     }
   } else {
-    // No env var: use current hostname with default backend port
-    result = `http://${currentHost}:${defaultPort}`;
+    // Derive from current hostname - this is the LAN-friendly default
+    result = `http://${currentHost}:${port}`;
   }
 
-  console.log(`[Platform] Backend URL derived: ${result} (host: ${currentHost}, envUrl: ${envUrl || 'not set'})`);
+  console.log(`[Platform] Backend URL: ${result} (host: ${currentHost}, port: ${port})`);
   return result;
 }
 
