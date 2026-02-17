@@ -153,12 +153,27 @@ start_frontend() {
                 host_ip="$detected_ip"
             fi
         fi
-        # Windows fallback (Git Bash / WSL)
-        if [ "$host_ip" = "localhost" ] && command -v ipconfig.exe &> /dev/null; then
-            local detected_ip=$(ipconfig.exe 2>/dev/null | grep -A 5 "Ethernet\|Wi-Fi" | grep "IPv4" | head -1 | awk -F: '{print $2}' | tr -d ' \r')
-            if [ -n "$detected_ip" ]; then
-                host_ip="$detected_ip"
+        # Windows fallback (Git Bash / WSL) - try multiple methods
+        if [ "$host_ip" = "localhost" ]; then
+            # Method 1: ipconfig.exe with improved parsing
+            if command -v ipconfig.exe &> /dev/null; then
+                local detected_ip=$(ipconfig.exe 2>/dev/null | grep -i "IPv4" | head -1 | sed 's/.*: //' | tr -d '\r\n ')
+                if [ -n "$detected_ip" ] && [[ "$detected_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    host_ip="$detected_ip"
+                fi
             fi
+            # Method 2: PowerShell (more reliable on Windows)
+            if [ "$host_ip" = "localhost" ] && command -v powershell.exe &> /dev/null; then
+                local detected_ip=$(powershell.exe -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -notmatch 'Loopback' -and \$_.IPAddress -notmatch '^169\.' } | Select-Object -First 1 -ExpandProperty IPAddress)" 2>/dev/null | tr -d '\r\n')
+                if [ -n "$detected_ip" ] && [[ "$detected_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+                    host_ip="$detected_ip"
+                fi
+            fi
+        fi
+        # If still localhost, warn user
+        if [ "$host_ip" = "localhost" ]; then
+            log_warn "Could not detect LAN IP. Set MATOU_HOST_IP for LAN access."
+            log_warn "Example: MATOU_HOST_IP=192.168.0.152 npm run dev:sessions"
         fi
     fi
 
