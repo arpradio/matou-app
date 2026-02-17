@@ -37,19 +37,26 @@ export function isBrowser(): boolean {
  * If accessed via LAN IP, use that IP for backend too.
  */
 function deriveBackendUrl(envUrl: string | undefined, defaultPort: number): string {
-  const currentHost = window.location.hostname;
+  // Handle SSR or missing window
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
   const isLanAccess = currentHost !== 'localhost' && currentHost !== '127.0.0.1';
+
+  let result: string;
 
   if (envUrl) {
     // If env var uses localhost but we're accessed via LAN IP, substitute hostname
     if (isLanAccess && (envUrl.includes('localhost') || envUrl.includes('127.0.0.1'))) {
-      return envUrl.replace(/localhost|127\.0\.0\.1/, currentHost);
+      result = envUrl.replace(/localhost|127\.0\.0\.1/, currentHost);
+    } else {
+      result = envUrl;
     }
-    return envUrl;
+  } else {
+    // No env var: use current hostname with default backend port
+    result = `http://${currentHost}:${defaultPort}`;
   }
 
-  // No env var: use current hostname with default backend port
-  return `http://${currentHost}:${defaultPort}`;
+  console.log(`[Platform] Backend URL derived: ${result} (host: ${currentHost}, envUrl: ${envUrl || 'not set'})`);
+  return result;
 }
 
 /**
