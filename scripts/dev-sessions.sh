@@ -94,14 +94,10 @@ start_backend() {
     log_info "Starting backend session $session on port $port (data: $data_dir)"
 
     # Start Go backend in subshell with proper working directory
-    # Bind to 0.0.0.0 for LAN access
-    # MATOU_INFRA_HOST specifies where infrastructure (KERI, any-sync nodes) runs
     (
         cd "$BACKEND_DIR"
         MATOU_DATA_DIR="$data_dir" \
-        MATOU_SERVER_HOST="0.0.0.0" \
         MATOU_SERVER_PORT="$port" \
-        MATOU_INFRA_HOST="${MATOU_INFRA_HOST:-localhost}" \
         exec go run ./cmd/server
     ) > "$log_file" 2>&1 &
 
@@ -143,54 +139,13 @@ start_frontend() {
         return 0
     fi
 
-    # Detect host IP for LAN access (use localhost as fallback)
-    local host_ip="${MATOU_HOST_IP:-localhost}"
-    if [ "$host_ip" = "localhost" ]; then
-        # Try Linux/Mac method first
-        if command -v hostname &> /dev/null; then
-            local detected_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
-            if [ -n "$detected_ip" ]; then
-                host_ip="$detected_ip"
-            fi
-        fi
-        # Windows fallback (Git Bash / WSL) - try multiple methods
-        if [ "$host_ip" = "localhost" ]; then
-            # Method 1: ipconfig.exe with improved parsing
-            if command -v ipconfig.exe &> /dev/null; then
-                local detected_ip=$(ipconfig.exe 2>/dev/null | grep -i "IPv4" | head -1 | sed 's/.*: //' | tr -d '\r\n ')
-                if [ -n "$detected_ip" ] && [[ "$detected_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                    host_ip="$detected_ip"
-                fi
-            fi
-            # Method 2: PowerShell (more reliable on Windows)
-            if [ "$host_ip" = "localhost" ] && command -v powershell.exe &> /dev/null; then
-                local detected_ip=$(powershell.exe -NoProfile -Command "(Get-NetIPAddress -AddressFamily IPv4 | Where-Object { \$_.InterfaceAlias -notmatch 'Loopback' -and \$_.IPAddress -notmatch '^169\.' } | Select-Object -First 1 -ExpandProperty IPAddress)" 2>/dev/null | tr -d '\r\n')
-                if [ -n "$detected_ip" ] && [[ "$detected_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-                    host_ip="$detected_ip"
-                fi
-            fi
-        fi
-        # If still localhost, warn user
-        if [ "$host_ip" = "localhost" ]; then
-            log_warn "Could not detect LAN IP. Set MATOU_HOST_IP for LAN access."
-            log_warn "Example: MATOU_HOST_IP=192.168.0.152 npm run dev:sessions"
-        fi
-    fi
-
-    # Infrastructure host (for config server, KERI, etc.)
-    local infra_host="${MATOU_INFRA_HOST:-$host_ip}"
-
-    log_info "Starting frontend session $session on port $port (backend port: $backend_port, infra: $infra_host)"
+    log_info "Starting frontend session $session on port $port (backend: http://localhost:$backend_port)"
 
     # Start in subshell with proper working directory
-    # For LAN access: Set VITE_BACKEND_PORT instead of full URL
-    # The frontend will derive the hostname from window.location.hostname
-    # This ensures users accessing via any IP get the correct backend URL
     (
         cd "$FRONTEND_DIR"
-        VITE_BACKEND_PORT="$backend_port" \
-        VITE_DEV_CONFIG_URL="http://$infra_host:3904" \
-        exec npm run dev -- --port "$port" --host
+        VITE_BACKEND_URL="http://localhost:$backend_port" \
+        exec npm run dev -- --port "$port"
     ) > "$log_file" 2>&1 &
 
     local pid=$!
@@ -215,8 +170,6 @@ start_sessions() {
     echo "========================================"
     echo "  Starting $num_sessions dev session(s)"
     echo "========================================"
-    echo ""
-    echo "  Infrastructure host: ${MATOU_INFRA_HOST:-localhost}"
     echo ""
 
     for ((i=1; i<=num_sessions; i++)); do
@@ -417,14 +370,6 @@ case "${1:-}" in
         echo "  Session 1: Frontend :5100, Backend :4000 (data: ./data)"
         echo "  Session 2: Frontend :5101, Backend :4001 (data: ./data2)"
         echo "  Session N: Frontend :510(N-1), Backend :400(N-1) (data: ./dataN)"
-        echo ""
-        echo "Environment variables:"
-        echo "  MATOU_INFRA_HOST    IP where infrastructure runs (KERI, any-sync nodes)"
-        echo "                      Default: localhost"
-        echo "  MATOU_HOST_IP       IP for frontend to reach backend (auto-detected)"
-        echo ""
-        echo "Example (infrastructure on another machine):"
-        echo "  MATOU_INFRA_HOST=192.168.0.42 $0 2"
         echo ""
         exit 1
         ;;

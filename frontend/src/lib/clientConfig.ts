@@ -44,6 +44,36 @@ const CONFIG_URL = CONFIG_URLS[ENV] || CONFIG_URLS.dev;
 const CACHE_KEY = 'matou_client_config';
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
+/**
+ * Substitute localhost URLs in config with the actual infrastructure host.
+ * This handles the case where the config server returns localhost URLs
+ * but the frontend is accessing via LAN IP.
+ */
+function substituteLocalhostUrls(config: ClientConfig, infraHost: string): ClientConfig {
+  const substitute = (url: string): string => {
+    if (url.includes('localhost') || url.includes('127.0.0.1')) {
+      return url.replace(/localhost|127\.0\.0\.1/, infraHost);
+    }
+    return url;
+  };
+
+  return {
+    ...config,
+    keri: {
+      admin_url: substitute(config.keri.admin_url),
+      boot_url: substitute(config.keri.boot_url),
+      cesr_url: substitute(config.keri.cesr_url),
+    },
+    schema_server_url: substitute(config.schema_server_url),
+    config_server_url: substitute(config.config_server_url),
+    witnesses: {
+      ...config.witnesses,
+      urls: config.witnesses.urls.map(substitute),
+      oobis: config.witnesses.oobis.map(substitute),
+    },
+  };
+}
+
 export interface WitnessConfig {
   urls: string[];
   aids: Record<string, string>;
@@ -131,7 +161,14 @@ async function doFetchConfig(): Promise<ClientConfig> {
       throw new Error(`Config server returned ${response.status}`);
     }
 
-    const config = await response.json() as ClientConfig;
+    let config = await response.json() as ClientConfig;
+
+    // Substitute localhost URLs with the config server's host for LAN access
+    // This ensures KERIA URLs point to the infrastructure, not localhost
+    const configHost = new URL(CONFIG_URL).hostname;
+    if (configHost !== 'localhost' && configHost !== '127.0.0.1') {
+      config = substituteLocalhostUrls(config, configHost);
+    }
 
     // Cache in memory
     cachedConfig = { config, timestamp: Date.now() };
