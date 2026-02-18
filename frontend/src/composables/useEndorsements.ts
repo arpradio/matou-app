@@ -241,36 +241,54 @@ export function useEndorsements() {
 
       // Build edge section referencing the membership credential
       // The edge creates a cryptographic chain from endorsement to membership
+      // Note: 'd' field is computed by signify-ts, we don't need to include it
       const edgeData = {
-        d: '', // Will be populated by SAID calculation
         membership: {
           n: params.endorseeMembershipSaid,
           s: MEMBERSHIP_SCHEMA_SAID,
         },
       };
+      console.log('[Endorsements] Edge data: membership SAID =', params.endorseeMembershipSaid);
 
       console.log('[Endorsements] Issuing endorsement credential...');
+
+      // Build attributes - only include optional fields if they have values
+      // Schema has additionalProperties: false, so we must match exactly
+      const attributes: Record<string, string> = {
+        i: params.endorseeAid,
+        dt: dt,
+        endorsementType: params.endorsementType,
+        claim: params.claim,
+        confidence: params.confidence,
+      };
+
+      // Only add optional fields if they have non-empty values
+      if (params.category) {
+        attributes.category = params.category;
+      }
+      if (params.evidence) {
+        attributes.evidence = params.evidence;
+      }
+      if (params.relationship) {
+        attributes.relationship = params.relationship;
+      }
+
+      console.log('[Endorsements] Credential attributes:', attributes);
+      console.log('[Endorsements] Credential edges:', edgeData);
 
       // Issue the credential with edge chain
       const credResult = await client.credentials().issue(endorserAidName, {
         ri: registryId,
         s: ENDORSEMENT_SCHEMA_SAID,
-        a: {
-          i: params.endorseeAid,
-          dt: dt,
-          endorsementType: params.endorsementType,
-          category: params.category || '',
-          claim: params.claim,
-          evidence: params.evidence || '',
-          confidence: params.confidence,
-          relationship: params.relationship || '',
-        },
+        a: attributes,
         e: edgeData,
       });
 
       console.log('[Endorsements] Waiting for credential issuance...');
+      console.log('[Endorsements] Credential operation:', JSON.stringify(credResult.op));
       const credOp = credResult.op;
-      await client.operations().wait(credOp, { signal: AbortSignal.timeout(60000) });
+      // Credential issuance with witness-backed AIDs can take longer
+      await client.operations().wait(credOp, { signal: AbortSignal.timeout(120000) });
 
       // Get SAID from the ACDC
       const acdcKed = (credResult.acdc as { ked?: { d?: string } })?.ked;
@@ -323,6 +341,22 @@ export function useEndorsements() {
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       console.error('[Endorsements] Issue failed:', err);
+
+      // If timeout, try to get more info about the operation
+      if (errorMsg.includes('timeout') || errorMsg.includes('timed out')) {
+        console.log('[Endorsements] Operation timed out - check KERIA logs for details');
+        try {
+          const client = keriClient.getSignifyClient();
+          if (client) {
+            // List operations to see status
+            const ops = await client.operations().list();
+            console.log('[Endorsements] Current operations:', ops);
+          }
+        } catch (opErr) {
+          console.warn('[Endorsements] Could not fetch operation status:', opErr);
+        }
+      }
+
       error.value = errorMsg;
       lastEndorsement.value = { said: '', success: false };
 
