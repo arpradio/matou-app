@@ -251,9 +251,22 @@ export function useEndorsements() {
       };
       console.log('[Endorsements] Edge data: membership SAID =', params.endorseeMembershipSaid);
 
-      // Validate membership SAID is provided
-      if (!params.endorseeMembershipSaid || params.endorseeMembershipSaid === 'unknown') {
-        throw new Error('Endorsee membership credential SAID is required. The endorsee must have a valid membership credential.');
+      // If membership SAID is missing or 'unknown', try to look it up from KERIA
+      let membershipSaid = params.endorseeMembershipSaid;
+      if (!membershipSaid || membershipSaid === 'unknown' || membershipSaid === '') {
+        console.log('[Endorsements] Membership SAID missing, attempting to look up from KERIA...');
+        const foundSaid = await keriClient.findMembershipCredentialSaid(
+          params.endorseeAid,
+          MEMBERSHIP_SCHEMA_SAID
+        );
+        if (foundSaid) {
+          console.log(`[Endorsements] Found membership credential SAID: ${foundSaid}`);
+          membershipSaid = foundSaid;
+          // Update edge data with found SAID
+          edgeData.membership.n = foundSaid;
+        } else {
+          throw new Error('Endorsee membership credential SAID is required. Could not find membership credential in KERIA. The endorsee may need to be re-approved.');
+        }
       }
 
       console.log('[Endorsements] Issuing endorsement credential...');

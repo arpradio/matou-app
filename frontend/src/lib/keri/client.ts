@@ -747,9 +747,28 @@ export class KERIClient {
     const credOp = credResult.op;
     await this.client.operations().wait(credOp, { signal: AbortSignal.timeout(60000) });
 
-    // Get SAID from the ACDC, handling signify-ts types
-    const acdcKed = (credResult.acdc as { ked?: { d?: string } })?.ked;
-    const credentialSaid = acdcKed?.d || 'unknown';
+    // Get SAID from the ACDC - check multiple possible locations
+    // signify-ts may return it in different structures depending on version
+    const acdc = credResult.acdc as Record<string, unknown>;
+    console.log('[KERIClient] Credential result structure:', {
+      hasAcdc: !!acdc,
+      acdcKeys: acdc ? Object.keys(acdc) : [],
+      ked: acdc?.ked,
+      d: acdc?.d,
+      said: acdc?.said,
+    });
+
+    // Try multiple locations for the SAID
+    const acdcKed = acdc?.ked as Record<string, unknown> | undefined;
+    const credentialSaid = (acdcKed?.d as string) ||
+                           (acdc?.d as string) ||
+                           (acdc?.said as string) ||
+                           (credResult as Record<string, unknown>)?.said as string;
+
+    if (!credentialSaid) {
+      console.error('[KERIClient] Could not extract credential SAID from response:', credResult);
+      throw new Error('Credential issued but SAID could not be extracted from response');
+    }
     console.log(`[KERIClient] Credential issued with SAID: ${credentialSaid}`);
 
     // Now grant the credential via IPEX
@@ -771,6 +790,39 @@ export class KERIClient {
     console.log(`[KERIClient] IPEX grant submitted, SAID: ${grantSaid}`);
 
     return { said: credentialSaid };
+  }
+
+  /**
+   * Find membership credential SAID for a given recipient AID
+   * Useful for fixing profiles with missing/invalid credential SAIDs
+   */
+  async findMembershipCredentialSaid(recipientAid: string, schemaId: string): Promise<string | null> {
+    if (!this.client) throw new Error('Not initialized');
+
+    try {
+      // List all credentials and find ones matching the schema and recipient
+      const credentials = await this.client.credentials().list();
+      console.log(`[KERIClient] Searching ${credentials.length} credentials for recipient ${recipientAid}`);
+
+      for (const cred of credentials) {
+        const sad = cred.sad as Record<string, unknown> | undefined;
+        const attrBlock = sad?.a as Record<string, unknown> | undefined;
+        const credSchema = sad?.s as string;
+        const credRecipient = attrBlock?.i as string;
+
+        if (credSchema === schemaId && credRecipient === recipientAid) {
+          const credSaid = sad?.d as string;
+          console.log(`[KERIClient] Found membership credential for ${recipientAid}: ${credSaid}`);
+          return credSaid;
+        }
+      }
+
+      console.log(`[KERIClient] No membership credential found for ${recipientAid}`);
+      return null;
+    } catch (err) {
+      console.error('[KERIClient] Error searching for credential:', err);
+      return null;
+    }
   }
 
   /**
