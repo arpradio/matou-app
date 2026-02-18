@@ -5,8 +5,8 @@
 import { ref, computed } from 'vue';
 import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
-import { fetchOrgConfig } from 'src/api/config';
 import { BACKEND_URL } from 'src/lib/api/client';
+import { secureStorage } from 'src/lib/secureStorage';
 
 // Schema SAIDs (computed via keripy on infrastructure)
 const ENDORSEMENT_SCHEMA_SAID = 'EPIm7hiwSUt5css49iLXFPaPDFOJx0MmfNoB3PkSMXkh';
@@ -102,24 +102,61 @@ export function useEndorsements() {
   const currentAID = computed(() => identityStore.currentAID);
 
   /**
-   * Get the registry ID for issuing endorsements
-   * Uses the organization's shared registry
+   * Get or create a personal registry for the endorser.
+   * Each member needs their own registry to issue credentials.
+   * The org's registry can only be used by the org AID.
    */
-  async function getRegistryId(): Promise<string> {
-    const configResult = await fetchOrgConfig();
-    if (configResult.status === 'not_configured') {
-      throw new Error('Organization not configured');
+  async function getOrCreatePersonalRegistry(aidName: string): Promise<string> {
+    const REGISTRY_KEY = `matou_endorser_registry_${aidName}`;
+
+    // Check if we have a cached registry ID
+    const cachedRegistryId = await secureStorage.getItem(REGISTRY_KEY);
+    if (cachedRegistryId) {
+      console.log(`[Endorsements] Using cached personal registry: ${cachedRegistryId}`);
+      return cachedRegistryId;
     }
 
-    const config = configResult.status === 'configured'
-      ? configResult.config
-      : configResult.cached;
-
-    if (!config?.registry?.id) {
-      throw new Error('No registry configured for credential issuance');
+    const client = keriClient.getSignifyClient();
+    if (!client) {
+      throw new Error('Not connected to KERIA');
     }
 
-    return config.registry.id;
+    // Check if registry already exists in KERIA
+    const registries = await client.registries().list(aidName);
+    const registryName = `${aidName}-endorsements`;
+    const existing = registries.find(
+      (r: { name: string }) => r.name === registryName
+    );
+
+    if (existing) {
+      console.log(`[Endorsements] Found existing registry: ${existing.regk}`);
+      await secureStorage.setItem(REGISTRY_KEY, existing.regk);
+      return existing.regk;
+    }
+
+    // Create new personal registry for endorsements
+    console.log(`[Endorsements] Creating personal registry for ${aidName}...`);
+    const result = await client.registries().create({
+      name: aidName,
+      registryName: registryName,
+    });
+
+    const op = await result.op();
+    await client.operations().wait(op, { signal: AbortSignal.timeout(60000) });
+
+    // Get the created registry ID
+    const newRegistries = await client.registries().list(aidName);
+    const newRegistry = newRegistries.find(
+      (r: { name: string }) => r.name === registryName
+    );
+
+    if (!newRegistry) {
+      throw new Error('Failed to create personal registry');
+    }
+
+    console.log(`[Endorsements] Created personal registry: ${newRegistry.regk}`);
+    await secureStorage.setItem(REGISTRY_KEY, newRegistry.regk);
+    return newRegistry.regk;
   }
 
   /**
@@ -173,8 +210,12 @@ export function useEndorsements() {
         throw new Error('You cannot endorse yourself');
       }
 
-      // Get registry ID
-      const registryId = await getRegistryId();
+      const endorserAidName = currentAID.value!.name;
+
+      // Get or create personal registry for the endorser
+      // Note: Each member needs their own registry - they can't use the org's registry
+      const registryId = await getOrCreatePersonalRegistry(endorserAidName);
+      console.log(`[Endorsements] Using registry: ${registryId}`);
 
       // Resolve endorsement schema OOBI (required before issuing)
       console.log('[Endorsements] Resolving endorsement schema OOBI...');
@@ -196,7 +237,6 @@ export function useEndorsements() {
         }
       }
 
-      const endorserAidName = currentAID.value!.name;
       const dt = new Date().toISOString();
 
       // Build edge section referencing the membership credential
@@ -316,8 +356,11 @@ export function useEndorsements() {
         throw new Error('No identity found');
       }
 
-      // Get registry ID
-      const registryId = await getRegistryId();
+      const revokerAidName = currentAID.value.name;
+
+      // Get or create personal registry for the revoker
+      const registryId = await getOrCreatePersonalRegistry(revokerAidName);
+      console.log(`[Endorsements] Using registry for revocation: ${registryId}`);
 
       // Resolve revocation schema OOBI (required before issuing)
       console.log('[Endorsements] Resolving revocation schema OOBI...');
@@ -329,7 +372,6 @@ export function useEndorsements() {
         // Continue anyway - KERIA might already have it cached
       }
 
-      const revokerAidName = currentAID.value.name;
       const dt = new Date().toISOString();
 
       // Build edge section referencing the endorsement being revoked
