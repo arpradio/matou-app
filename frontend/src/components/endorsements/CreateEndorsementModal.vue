@@ -126,6 +126,12 @@
           </select>
         </div>
 
+        <!-- Missing Membership SAID Warning -->
+        <div v-if="!props.endorseeMembershipSaid" class="form-error">
+          <AlertTriangle :size="16" />
+          <span>Cannot create endorsement: This member's membership credential SAID is not available. They may need to be re-approved or their profile data is incomplete.</span>
+        </div>
+
         <!-- Error Message -->
         <div v-if="error" class="form-error">
           <AlertTriangle :size="16" />
@@ -248,7 +254,9 @@ const categoryPlaceholder = computed(() => {
 });
 
 const canSubmit = computed(() => {
-  return claim.value.trim().length >= 10 && claim.value.length <= 500;
+  const hasValidClaim = claim.value.trim().length >= 10 && claim.value.length <= 500;
+  const hasValidMembershipSaid = !!props.endorseeMembershipSaid;
+  return hasValidClaim && hasValidMembershipSaid;
 });
 
 // Watch for modal open/close to reset state

@@ -57,11 +57,11 @@
 
     <!-- Create Endorsement Modal -->
     <CreateEndorsementModal
-      v-if="memberAid && membershipSaid"
+      v-if="memberAid"
       :is-open="showEndorsementModal"
       :endorsee-aid="memberAid"
       :endorsee-name="memberName"
-      :endorsee-membership-said="membershipSaid"
+      :endorsee-membership-said="membershipSaid || ''"
       :endorsee-oobi="memberOobi"
       :endorsee-skills="memberSkills"
       :endorsee-interests="memberInterests"
@@ -140,14 +140,19 @@ const memberInterests = computed(() => {
 const currentUserAid = computed(() => identityStore.currentAID?.prefix);
 
 const canEndorse = computed(() => {
-  // Can endorse if: logged in, has different AID than member, member has AID, and has valid membership SAID
-  const hasValidMembershipSaid = props.membershipSaid && props.membershipSaid !== 'unknown';
-  return (
+  // Can endorse if: logged in, has different AID than member, and member has AID
+  // Note: membershipSaid validation happens when the modal opens
+  const result = (
     currentUserAid.value &&
     props.memberAid &&
-    currentUserAid.value !== props.memberAid &&
-    hasValidMembershipSaid
+    currentUserAid.value !== props.memberAid
   );
+  console.log('[MemberProfileDialog] canEndorse:', result, {
+    currentUserAid: currentUserAid.value,
+    memberAid: props.memberAid,
+    membershipSaid: props.membershipSaid,
+  });
+  return result;
 });
 
 // Load endorsements when member changes
