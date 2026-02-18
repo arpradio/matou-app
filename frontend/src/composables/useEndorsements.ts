@@ -241,14 +241,20 @@ export function useEndorsements() {
 
       // Build edge section referencing the membership credential
       // The edge creates a cryptographic chain from endorsement to membership
-      // Note: 'd' field is computed by signify-ts, we don't need to include it
+      // The 'd' field is a SAID placeholder - KERIA computes it during issuance
       const edgeData = {
+        d: '',  // Required by schema, computed by KERIA
         membership: {
           n: params.endorseeMembershipSaid,
           s: MEMBERSHIP_SCHEMA_SAID,
         },
       };
       console.log('[Endorsements] Edge data: membership SAID =', params.endorseeMembershipSaid);
+
+      // Validate membership SAID is provided
+      if (!params.endorseeMembershipSaid || params.endorseeMembershipSaid === 'unknown') {
+        throw new Error('Endorsee membership credential SAID is required. The endorsee must have a valid membership credential.');
+      }
 
       console.log('[Endorsements] Issuing endorsement credential...');
 

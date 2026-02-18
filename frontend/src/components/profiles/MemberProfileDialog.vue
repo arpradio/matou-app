@@ -140,11 +140,13 @@ const memberInterests = computed(() => {
 const currentUserAid = computed(() => identityStore.currentAID?.prefix);
 
 const canEndorse = computed(() => {
-  // Can endorse if: logged in, has different AID than member, and member has AID
+  // Can endorse if: logged in, has different AID than member, member has AID, and has valid membership SAID
+  const hasValidMembershipSaid = props.membershipSaid && props.membershipSaid !== 'unknown';
   return (
     currentUserAid.value &&
     props.memberAid &&
-    currentUserAid.value !== props.memberAid
+    currentUserAid.value !== props.memberAid &&
+    hasValidMembershipSaid
   );
 });
 

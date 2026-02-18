@@ -338,11 +338,30 @@ function findCommunityProfile(sharedProfile: Record<string, unknown>): Record<st
 function handleMemberClick(member: { profile: Record<string, unknown>; communityProfile?: Record<string, unknown> }) {
   // Extract member AID and credential info for endorsements
   const memberAid = (member.profile?.aid as string) || (member.profile?.userAID as string) || (member.communityProfile?.userAID as string);
+
   // Check both credentialSaid and credential (legacy field name)
-  const membershipSaid = (member.communityProfile?.credentialSaid as string) ||
-                         (member.communityProfile?.credential as string) ||
+  // The communityProfile may have the credential directly or in nested data
+  const cp = member.communityProfile;
+  const cpData = (cp?.data as Record<string, unknown>) || cp;
+  const profileData = (member.profile?.data as Record<string, unknown>) || member.profile;
+
+  const membershipSaid = (cpData?.credentialSaid as string) ||
+                         (cpData?.credential as string) ||
+                         (cp?.credentialSaid as string) ||
+                         (cp?.credential as string) ||
+                         (profileData?.credentialSaid as string) ||
+                         (profileData?.credential as string) ||
                          (member.profile?.credentialSaid as string) ||
                          (member.profile?.credential as string);
+
+  console.log('[Dashboard] Member clicked:', {
+    memberAid,
+    membershipSaid,
+    cpHasCredential: cpData?.credential,
+    cpHasCredentialSaid: cpData?.credentialSaid,
+    communityProfile: cp,
+  });
+
   selectedMember.value = {
     shared: member.profile,
     community: member.communityProfile,
