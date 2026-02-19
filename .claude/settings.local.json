@@ -3,7 +3,9 @@
     "allow": [
       "Bash(go build:*)",
       "Bash(find:*)",
-      "Bash(node saidify.js:*)"
+      "Bash(node saidify.js:*)",
+      "WebSearch",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

@@ -7,6 +7,7 @@ import { useKERIClient } from 'src/lib/keri/client';
 import { useIdentityStore } from 'stores/identity';
 import { BACKEND_URL } from 'src/lib/api/client';
 import { secureStorage } from 'src/lib/secureStorage';
+import { fetchOrgConfig } from 'src/api/config';
 
 // Schema SAIDs (computed via keripy on infrastructure)
 const ENDORSEMENT_SCHEMA_SAID = 'EPIm7hiwSUt5css49iLXFPaPDFOJx0MmfNoB3PkSMXkh';
@@ -17,6 +18,9 @@ const MEMBERSHIP_SCHEMA_SAID = 'EOVL3N0K_tYc9U-HXg7r2jDPo4Gnq3ebCjDqbJzl6fsT';
 const SCHEMA_SERVER_URL = 'http://schema-server:7723';
 const ENDORSEMENT_SCHEMA_OOBI = `${SCHEMA_SERVER_URL}/oobi/${ENDORSEMENT_SCHEMA_SAID}`;
 const REVOCATION_SCHEMA_OOBI = `${SCHEMA_SERVER_URL}/oobi/${REVOCATION_SCHEMA_SAID}`;
+
+// KERIA internal URL for constructing OOBIs that KERIA can resolve
+const KERIA_INTERNAL_URL = 'http://keria:3902';
 
 // Endorsement types
 export const EndorsementType = {
@@ -100,6 +104,86 @@ export function useEndorsements() {
 
   // Computed
   const currentAID = computed(() => identityStore.currentAID);
+
+  /**
+   * Resolve the credential chain required for endorsement issuance.
+   *
+   * When issuing an endorsement that references a membership credential via edge,
+   * KERI's verifier needs:
+   * 1. The org's KEL (key event log) - for signature verification of the membership credential
+   * 2. The org's registry TEL (transaction event log) - for membership credential status
+   *
+   * Without these, the verifier throws MissingChainError when processing the endorsement.
+   *
+   * @param membershipSaid - Optional SAID of the membership credential to pre-resolve
+   */
+  async function resolveCredentialChain(membershipSaid?: string): Promise<{ registryId?: string }> {
+    console.log('[Endorsements] Resolving credential chain for endorsement...');
+    let registryId: string | undefined;
+
+    try {
+      const configResult = await fetchOrgConfig();
+      const config = configResult.status === 'configured'
+        ? configResult.config
+        : configResult.status === 'server_unreachable'
+          ? configResult.cached
+          : null;
+
+      if (!config) {
+        console.warn('[Endorsements] No org config available for chain resolution');
+        return {};
+      }
+
+      // 1. Resolve org OOBI (for org's KEL - needed to verify membership credential signatures)
+      if (config.organization?.oobi) {
+        try {
+          console.log('[Endorsements] Resolving org OOBI for KEL access...');
+          await keriClient.resolveOOBI(config.organization.oobi, 'matou-org', 15000);
+          console.log('[Endorsements] Org OOBI resolved');
+        } catch (err) {
+          console.warn('[Endorsements] Could not resolve org OOBI:', err);
+        }
+      }
+
+      // 2. Resolve org registry OOBI (for TEL - needed to verify membership credential status)
+      // The registry OOBI allows the endorser's KERIA to access the TEL for membership credentials
+      if (config.registry?.id) {
+        registryId = config.registry.id;
+        try {
+          // Construct registry OOBI using KERIA internal URL (for Docker resolution)
+          const registryOobi = `${KERIA_INTERNAL_URL}/oobi/${registryId}`;
+          console.log('[Endorsements] Resolving registry OOBI for TEL access:', registryOobi);
+          await keriClient.resolveOOBI(registryOobi, 'matou-registry', 15000);
+          console.log('[Endorsements] Registry OOBI resolved');
+        } catch (err) {
+          console.warn('[Endorsements] Could not resolve registry OOBI:', err);
+        }
+
+        // 3. Query membership credential state to ensure TEL entry is in Tevers
+        // This proactively fetches the credential's TEL state before issuing the endorsement
+        if (membershipSaid && membershipSaid !== 'unknown' && membershipSaid !== '') {
+          const client = keriClient.getSignifyClient();
+          if (client) {
+            try {
+              console.log('[Endorsements] Querying membership credential state:', membershipSaid);
+              const credState = await client.credentials().state(registryId, membershipSaid);
+              console.log('[Endorsements] Membership credential state resolved:', credState);
+            } catch (stateErr) {
+              // State query failure is not fatal - the TEL might still be accessible
+              console.warn('[Endorsements] Could not query credential state (continuing):', stateErr);
+            }
+          }
+        }
+      } else {
+        console.warn('[Endorsements] No registry ID in config - TEL resolution may fail');
+      }
+    } catch (err) {
+      console.warn('[Endorsements] Credential chain resolution failed:', err);
+      // Continue anyway - the issuance may still work if OOBIs were previously resolved
+    }
+
+    return { registryId };
+  }
 
   /**
    * Get or create a personal registry for the endorser.
@@ -237,6 +321,53 @@ export function useEndorsements() {
         }
       }
 
+      // If membership SAID is missing or 'unknown', try to look it up
+      let membershipSaid = params.endorseeMembershipSaid;
+      if (!membershipSaid || membershipSaid === 'unknown' || membershipSaid === '') {
+        console.log('[Endorsements] Membership SAID missing, attempting to look up...');
+
+        // First try KERIA (for self-endorsement or if endorser has received the credential)
+        const foundInKeria = await keriClient.findMembershipCredentialSaid(
+          params.endorseeAid,
+          MEMBERSHIP_SCHEMA_SAID
+        );
+        if (foundInKeria) {
+          console.log(`[Endorsements] Found membership credential SAID in KERIA: ${foundInKeria}`);
+          membershipSaid = foundInKeria;
+        } else {
+          // Fallback: Fetch from backend's community members API
+          // The backend has all membership credentials synced/cached
+          console.log('[Endorsements] Not in KERIA, fetching from backend community members...');
+          try {
+            const response = await fetch(`${BACKEND_URL}/api/v1/community/members`, {
+              method: 'GET',
+              headers: { 'Content-Type': 'application/json' },
+              signal: AbortSignal.timeout(10000),
+            });
+            if (response.ok) {
+              const data = await response.json() as {
+                members: Array<{ aid: string; credentialSaid: string }>;
+              };
+              const member = data.members.find(m => m.aid === params.endorseeAid);
+              if (member?.credentialSaid) {
+                console.log(`[Endorsements] Found membership credential SAID in backend: ${member.credentialSaid}`);
+                membershipSaid = member.credentialSaid;
+              }
+            }
+          } catch (backendErr) {
+            console.warn('[Endorsements] Backend lookup failed:', backendErr);
+          }
+        }
+      }
+
+      // CRITICAL: Resolve the credential chain before building the edge
+      // This ensures KERIA has access to:
+      // - The org's KEL (for verifying the membership credential's issuer signature)
+      // - The org's registry TEL (for verifying the membership credential's status)
+      // Without this, KERI throws MissingChainError: "credential identifier not in Tevers"
+      console.log('[Endorsements] Resolving credential chain for edge verification...');
+      await resolveCredentialChain(membershipSaid);
+
       const dt = new Date().toISOString();
 
       // Build edge section referencing the membership credential
@@ -245,28 +376,15 @@ export function useEndorsements() {
       const edgeData = {
         d: '',  // Required by schema, computed by KERIA
         membership: {
-          n: params.endorseeMembershipSaid,
+          n: membershipSaid,
           s: MEMBERSHIP_SCHEMA_SAID,
         },
       };
-      console.log('[Endorsements] Edge data: membership SAID =', params.endorseeMembershipSaid);
+      console.log('[Endorsements] Edge data: membership SAID =', membershipSaid);
 
-      // If membership SAID is missing or 'unknown', try to look it up from KERIA
-      let membershipSaid = params.endorseeMembershipSaid;
+      // Verify we have a valid membership SAID
       if (!membershipSaid || membershipSaid === 'unknown' || membershipSaid === '') {
-        console.log('[Endorsements] Membership SAID missing, attempting to look up from KERIA...');
-        const foundSaid = await keriClient.findMembershipCredentialSaid(
-          params.endorseeAid,
-          MEMBERSHIP_SCHEMA_SAID
-        );
-        if (foundSaid) {
-          console.log(`[Endorsements] Found membership credential SAID: ${foundSaid}`);
-          membershipSaid = foundSaid;
-          // Update edge data with found SAID
-          edgeData.membership.n = foundSaid;
-        } else {
-          throw new Error('Endorsee membership credential SAID is required. Could not find membership credential in KERIA. The endorsee may need to be re-approved.');
-        }
+        throw new Error('Endorsee membership credential SAID is required. Could not find membership credential in KERIA. The endorsee may need to be re-approved.');
       }
 
       console.log('[Endorsements] Issuing endorsement credential...');
@@ -424,6 +542,10 @@ export function useEndorsements() {
         console.warn('[Endorsements] Revocation schema OOBI resolution issue:', schemaErr);
         // Continue anyway - KERIA might already have it cached
       }
+
+      // Resolve credential chain for edge verification
+      // The revocation references an endorsement which references a membership
+      await resolveCredentialChain();
 
       const dt = new Date().toISOString();
 
